@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulador 3D IPS - Modelo de Colas M/M/s con Prioridades y Fichos</title>
+  
+  <!-- Estilos -->
+  <link rel="stylesheet" href="/static/css/style.css">
+  
+  <!-- Three.js y OrbitControls (Locales) -->
+  <script src="/static/js/three.min.js"></script>
+  <script src="/static/js/OrbitControls.js"></script>
+  
+  <!-- Chart.js (Local) -->
+  <script src="/static/js/chart.min.js"></script>
+</head>
+<body>
+
+  <!-- Contenedor 3D WebGL -->
+  <div id="canvas-container"></div>
+
+  <!-- Botones Flotantes en los Bordes para Reabrir Ventanillas Laterales -->
+  <button id="btn-toggle-config-panel" class="edge-toggle-btn left-edge" title="Abrir o Cerrar Panel de Parámetros">
+    <span>⚙</span> Parámetros
+  </button>
+  <button id="btn-toggle-stats-panel" class="edge-toggle-btn right-edge" title="Abrir o Cerrar Turnero y Estadísticas">
+    <span>📟</span> Turnero & KPIs
+  </button>
+
+  <!-- Barra Superior / Header de Control Principal -->
+  <header class="top-navbar">
+    <div class="brand-section">
+      <div class="brand-icon">🏥</div>
+      <div>
+        <div class="brand-title">
+          IPS VIVA SALUD INTEGRAL
+          <span class="brand-badge">MODELO M/M/s</span>
+        </div>
+        <div class="brand-subtitle">Simulador de Recepción con Prioridades Humanitarias y Fichos</div>
+      </div>
+    </div>
+
+    <!-- Controles de Reproducción y Reloj de Simulación -->
+    <div class="sim-controls-bar">
+      <!-- Reloj IPS -->
+      <div class="clock-display">
+        <span style="font-size: 15px;">🕒</span>
+        <span id="live-clock" class="clock-text">05:00 AM</span>
+        <span id="live-phase" class="phase-indicator phase-fichos">FASE 1: LLEGADA Y FICHOS</span>
+      </div>
+
+      <!-- Botones de Control de Tiempo -->
+      <button id="btn-play-pause" class="btn-ctrl btn-primary-action">▶ Iniciar</button>
+      <button id="btn-step" class="btn-ctrl" title="Avanzar un solo evento de simulación">⏯ Paso</button>
+      <button id="btn-reset" class="btn-ctrl" title="Reiniciar simulación">↺ Reiniciar</button>
+      <button id="btn-skip-end" class="btn-ctrl" title="Saltar al final de la jornada">⏭ Saltar al Final</button>
+
+      <!-- Selector de Velocidad -->
+      <div class="speed-selector-group">
+        <button class="btn-ctrl btn-speed" data-speed="0.5">0.5x</button>
+        <button class="btn-ctrl btn-speed active" data-speed="1.0">1x</button>
+        <button class="btn-ctrl btn-speed" data-speed="2.0">2x</button>
+        <button class="btn-ctrl btn-speed" data-speed="5.0">5x</button>
+        <button class="btn-ctrl btn-speed" data-speed="15.0">15x</button>
+      </div>
+
+      <!-- Sonido -->
+      <button id="btn-toggle-audio" class="btn-ctrl">🔔 Sonido: ON</button>
+    </div>
+  </header>
+
+  <!-- Barra Inferior de Navegación 3D y Cámaras (Ubicada sobre el dock inferior) -->
+  <div class="cam-nav-bar">
+    <div class="nav-bar-section">
+      <span class="nav-label">Cámara:</span>
+      <button class="cam-btn active" data-cam="iso">General (ISO)</button>
+      <button class="cam-btn" data-cam="tokens">Fichos 6 AM</button>
+      <button class="cam-btn" data-cam="waiting">Espera 8 AM</button>
+      <button class="cam-btn" data-cam="desks">Ventanillas</button>
+    </div>
+
+    <div class="nav-bar-divider"></div>
+
+    <div class="nav-bar-section">
+      <span class="nav-label">Mouse:</span>
+      <button id="btn-mode-rotate" class="mouse-mode-btn active" title="Clic izquierdo: Orbitar / Rotar">🔄 Rotar</button>
+      <button id="btn-mode-pan" class="mouse-mode-btn" title="Clic izquierdo: Desplazar vista (arriba, abajo, lados)">✋ Mover</button>
+    </div>
+
+    <div class="nav-bar-divider"></div>
+
+    <div class="nav-bar-section pan-arrows">
+      <button class="arrow-btn" id="btn-pan-left" title="Desplazar a la izquierda (A o Flecha Izq)">◄</button>
+      <button class="arrow-btn" id="btn-pan-up" title="Desplazar arriba (W o Flecha Arriba)">▲</button>
+      <button class="arrow-btn" id="btn-pan-down" title="Desplazar abajo (S o Flecha Abajo)">▼</button>
+      <button class="arrow-btn" id="btn-pan-right" title="Desplazar a la derecha (D o Flecha Der)">►</button>
+    </div>
+  </div>
+
+  <!-- Panel Izquierdo Flotante: Configuración de Parámetros (Entradas Numéricas Directas) -->
+  <aside id="config-panel" class="floating-panel">
+    <div class="panel-header">
+      <span class="panel-title">⚙ Parámetros de Simulación</span>
+      <button class="btn-ctrl" id="btn-close-config" title="Cerrar panel (puedes volver a abrirlo con el botón de la izquierda)">✕</button>
+    </div>
+    <div class="panel-content">
+      
+      <!-- Carga Rápida de Escenarios -->
+      <div class="scenarios-box">
+        <div class="scenarios-title">⚡ Escenarios Predefinidos:</div>
+        <div class="scenarios-grid">
+          <button type="button" class="btn-scenario" data-scenario="base">Base (3 vent. / 30 fichos)</button>
+          <button type="button" class="btn-scenario" data-scenario="optimized">Alta Capacidad (5 vent.)</button>
+          <button type="button" class="btn-scenario" data-scenario="contingency">Contingencia (2 vent.)</button>
+        </div>
+      </div>
+
+      <!-- 1. MU: Tasa de llegada -->
+      <div class="form-group">
+        <label class="form-label" for="param_mu">
+          <span>1. μ (Tasa de Llegada - Pacientes/Hora):</span>
+        </label>
+        <div class="number-input-group">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_mu', -2)">−</button>
+          <input type="number" id="param_mu" class="form-input-number" min="5" max="120" value="30" step="1">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_mu', 2)">+</button>
+        </div>
+        <small class="field-hint">Tasa de llegada de pacientes (media entre llegadas 60/μ min calculada por SimPy)</small>
+      </div>
+
+      <!-- 2. LAMBDA: Tiempo promedio de atención -->
+      <div class="form-group">
+        <label class="form-label" for="param_lambda">
+          <span>2. λ (Tiempo Promedio de Atención en Ventanilla):</span>
+        </label>
+        <div class="number-input-group">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_lambda', -0.5)">−</button>
+          <input type="number" id="param_lambda" class="form-input-number" min="1.0" max="30.0" value="7.0" step="0.5">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_lambda', 0.5)">+</button>
+        </div>
+        <small class="field-hint">Minutos de atención en taquilla (distribución exponencial gestionada por SimPy)</small>
+      </div>
+
+      <!-- 3. S: Ventanillas de recepción -->
+      <div class="form-group">
+        <label class="form-label" for="param_s">
+          <span>3. S (Ventanillas de Recepción / Servidores):</span>
+        </label>
+        <div class="number-input-group">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_s', -1)">−</button>
+          <input type="number" id="param_s" class="form-input-number" min="1" max="10" value="3" step="1">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_s', 1)">+</button>
+        </div>
+        <small class="field-hint">Servidores en paralelo para el modelo M/M/s con cola de prioridad en SimPy</small>
+      </div>
+
+      <!-- 4. K: Tickets / fichos base -->
+      <div class="form-group">
+        <label class="form-label" for="param_k">
+          <span>4. k (Cantidad de Tickets / Fichos Base):</span>
+        </label>
+        <div class="number-input-group">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_k', -5)">−</button>
+          <input type="number" id="param_k" class="form-input-number" min="5" max="100" value="30" step="1">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_k', 5)">+</button>
+        </div>
+        <small class="field-hint">Total de tickets y cantidad idéntica equivalente de sillas en sala de espera</small>
+      </div>
+
+      <!-- Total de Personas que Llegan a la Fila -->
+      <div class="form-group">
+        <label class="form-label" for="param_total_arrivals">
+          <span>Total de Personas que Llegan a la Fila:</span>
+        </label>
+        <div class="number-input-group">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_total_arrivals', -5)">−</button>
+          <input type="number" id="param_total_arrivals" class="form-input-number" min="10" max="250" value="45" step="1">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_total_arrivals', 5)">+</button>
+        </div>
+        <small class="field-hint">Los que lleguen después de los k tickets son rechazados con animación de salida</small>
+      </div>
+
+      <!-- Configuración de Disciplina de Cola y Prioridades (Auto SimPy vs Manual 100%) -->
+      <div class="priority-config-card">
+        <div class="priority-checkbox-row">
+          <input type="checkbox" id="chk-manual-priority" class="form-checkbox">
+          <label for="chk-manual-priority" class="checkbox-label">
+            Habilitar ajuste manual de distribución (100%)
+          </label>
+        </div>
+        
+        <div id="priority-auto-box" class="priority-auto-notice">
+          🎲 <strong>Modo Automático:</strong> SimPy genera aleatoriamente la condición de cada paciente en el backend (~75% regulares, 25% prioritarios).
+        </div>
+
+        <div id="priority-manual-container" class="priority-manual-fields" style="display: none;">
+          <div class="manual-header-row">
+            <span style="font-size: 11px; font-weight: 700; color: #cbd5e1;">Distribución personalizada:</span>
+            <span id="priority-sum-badge" class="badge-sum-ok">Total: 100%</span>
+          </div>
+
+          <div class="prio-field-row">
+            <label>👤 % Regulares:</label>
+            <input type="number" id="prio_pct_regular" class="prio-mini-input" min="0" max="100" value="70">
+          </div>
+          <div class="prio-field-row">
+            <label>👴 % Adultos Mayores (60+):</label>
+            <input type="number" id="prio_pct_elderly" class="prio-mini-input" min="0" max="100" value="12">
+          </div>
+          <div class="prio-field-row">
+            <label>♿ % Con Discapacidad:</label>
+            <input type="number" id="prio_pct_disability" class="prio-mini-input" min="0" max="100" value="8">
+          </div>
+          <div class="prio-field-row">
+            <label>🤰 % Embarazadas:</label>
+            <input type="number" id="prio_pct_pregnant" class="prio-mini-input" min="0" max="100" value="6">
+          </div>
+          <div class="prio-field-row">
+            <label>🤝 % Vulnerables:</label>
+            <input type="number" id="prio_pct_vulnerable" class="prio-mini-input" min="0" max="100" value="4">
+          </div>
+
+          <button type="button" id="btn-balance-100" class="btn-ctrl" style="width: 100%; justify-content: center; margin-top: 6px; font-size: 11px;">
+            ⚖ Equilibrar al 100%
+          </button>
+        </div>
+      </div>
+
+      <!-- Semilla Aleatoria -->
+      <div class="form-group" style="margin-top: 10px;">
+        <label class="form-label" for="random_seed">
+          <span>Semilla Aleatoria (Seed Opcional):</span>
+        </label>
+        <input type="number" id="random_seed" class="form-input" placeholder="Ej: 42 (deja vacío para aleatorio)" value="42">
+        <small class="field-hint">Para reproducir exactamente los mismos experimentos</small>
+      </div>
+
+      <!-- Botón Ejecutar Simulación -->
+      <button id="btn-run-sim" class="btn-ctrl btn-primary-action" style="width: 100%; justify-content: center; padding: 12px; margin-top: 10px; font-size: 14px;">
+        🚀 Aplicar Parámetros y Simular en SimPy
+      </button>
+
+      <!-- Resumen de Regla de Negocio -->
+      <div class="business-rule-note">
+        <strong style="color: #38bdf8;">📌 Regla de Excepción IPS:</strong>
+        <p style="margin-top: 5px;">
+          Los pacientes prioritarios adelantan la fila para fichos. Si los k tickets base ya se agotaron y llega una persona con discapacidad o vulnerable, <strong>recibe un Ficho Extra</strong> sin quitarle el turno a los demás. Los pacientes regulares que lleguen tarde son rechazados y se retiran.
+        </p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Panel Derecho Flotante: Turnero y KPIs en Vivo -->
+  <aside id="stats-panel" class="floating-panel">
+    <div class="panel-header">
+      <span class="panel-title">📟 Turnero y Estadísticas</span>
+      <button class="btn-ctrl" id="btn-close-stats" title="Cerrar panel (puedes volver a abrirlo con el botón de la derecha)">✕</button>
+    </div>
+    <div class="panel-content">
+      <!-- Turnero Electrónico Digital -->
+      <div class="turnero-box">
+        <div class="turnero-title">LLAMANDO A RECEPCIÓN</div>
+        <div class="turnero-call">
+          <span id="turnero-ticket" class="turnero-ticket">--</span>
+          <span class="turnero-arrow">➔</span>
+          <span id="turnero-desk" class="turnero-desk">--</span>
+        </div>
+        <div id="turnero-name" class="turnero-patient-name">Esperando llamada...</div>
+        <div id="turnero-tag" class="turnero-prio-tag" style="display: none;">PRIORITARIO</div>
+      </div>
+
+      <!-- Métricas en Tiempo Real (HUD) -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <span class="kpi-label">Fichos Base</span>
+          <span id="hud-tokens-given" class="kpi-val highlight-blue">0 / 30</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Fichos Extras (Excepción)</span>
+          <span id="hud-extra-tokens" class="kpi-val highlight-gold">+0</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">En Espera Recepción</span>
+          <span id="hud-waiting-reception" class="kpi-val highlight-red">0</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Ventanillas Activas</span>
+          <span id="hud-active-desks" class="kpi-val highlight-green">0 / 3</span>
+        </div>
+      </div>
+
+      <!-- Métricas Globales de Espera Calculadas por SimPy -->
+      <div class="kpi-summary-box">
+        <div class="kpi-summary-header">
+          Tiempos Promedio de Espera (SimPy)
+        </div>
+        <div class="kpi-row">
+          <span>Espera Recepción Prioritario:</span>
+          <strong id="kpi-wait-recep-prio" style="color: #fbbf24;">0.0 min</strong>
+        </div>
+        <div class="kpi-row">
+          <span>Espera Recepción Regular:</span>
+          <strong id="kpi-wait-recep-reg" style="color: #38bdf8;">0.0 min</strong>
+        </div>
+        <div class="kpi-row">
+          <span>Reducción para Prioritarios:</span>
+          <strong id="kpi-benefit-percent" style="color: #34d399;">-0%</strong>
+        </div>
+        <div class="kpi-row">
+          <span>Duración Media Atención:</span>
+          <strong id="kpi-service-mean" style="color: #e2e8f0;">0.0 min</strong>
+        </div>
+      </div>
+
+      <!-- Registro de Eventos en Vivo (Log Stream) -->
+      <div class="log-stream-header">
+        Registro en Vivo de Eventos
+      </div>
+      <ul id="live-event-stream" class="log-stream"></ul>
+    </div>
+  </aside>
+
+  <!-- Dock Inferior: Acceso a Análisis, Tablas, Justificación y Descargas -->
+  <nav class="bottom-dock">
+    <button class="dock-btn" data-tab="charts">
+      <span>📊</span> Gráficas M/M/s
+    </button>
+    <button class="dock-btn" data-tab="theory">
+      <span>📐</span> Fórmulas Teóricas
+    </button>
+    <button class="dock-btn" data-tab="justification">
+      <span>📋</span> Origen y Justificación
+    </button>
+    <button class="dock-btn" data-tab="patients">
+      <span>👥</span> Listado de Pacientes
+    </button>
+    <a href="/api/export/csv" class="dock-btn" style="text-decoration: none;">
+      <span>📥</span> Descargar CSV
+    </a>
+    <a href="/api/export/json" target="_blank" class="dock-btn" style="text-decoration: none;">
+      <span>📦</span> JSON API
+    </a>
+  </nav>
+
+  <!-- Modal Emergente para Pestañas Detalladas -->
+  <div id="analytics-modal" class="modal-overlay">
+    <div class="modal-window">
+      <div class="modal-header">
+        <div class="modal-tabs">
+          <button class="tab-btn active" data-tab="charts">📊 Gráficas Comparativas</button>
+          <button class="tab-btn" data-tab="theory">📐 Teoría de Colas (Erlang-C)</button>
+          <button class="tab-btn" data-tab="justification">📋 Origen de Datos & Justificación</button>
+          <button class="tab-btn" data-tab="patients">👥 Pacientes y Tiempos</button>
+        </div>
+        <button id="modal-close-btn" class="btn-ctrl" style="padding: 6px 12px;">✕ Cerrar</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Pestaña 1: Gráficas -->
+        <div id="tab-charts" class="tab-content active">
+          <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px;">
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 16px;">
+              <h4 style="color: #38bdf8; font-size: 14px; margin-bottom: 12px;">Comparación de Tiempos: Prioritarios vs Regulares (Minutos)</h4>
+              <canvas id="chart-wait-times" height="200"></canvas>
+            </div>
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 16px;">
+              <h4 style="color: #38bdf8; font-size: 14px; margin-bottom: 12px;">Distribución de Población por Prioridad</h4>
+              <canvas id="chart-categories" height="200"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pestaña 2: Fórmulas de Teoría de Colas -->
+        <div id="tab-theory" class="tab-content">
+          <div id="theory-metrics-content">Cargando cálculos analíticos...</div>
+          
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 16px; margin-top: 14px; font-size: 12px; line-height: 1.6; color: #cbd5e1;">
+            <h4 style="color: #38bdf8; margin-bottom: 8px;">Fundamento Matemático del Modelo M/M/s con Servidores Múltiples</h4>
+            <p>
+              El modelo <strong>M/M/s</strong> asume llegadas según un proceso de Poisson con tasa <strong>λ</strong>, tiempos de servicio exponenciales con tasa <strong>μ</strong> en cada una de las <strong>s</strong> ventanillas paralelas.
+            </p>
+            <ul style="margin-left: 20px; margin-top: 8px;">
+              <li><strong>Intensidad de tráfico:</strong> ρ = λ / (s · μ). Para estabilidad se requiere ρ &lt; 1.</li>
+              <li><strong>Probabilidad de cola (Erlang-C):</strong> P(Espera &gt; 0) = C(s, λ/μ) = [ (λ/μ)^s / (s!(1-ρ)) ] · P₀</li>
+              <li><strong>Modelo de Prioridades No Apropiativas (Cobham):</strong> Los pacientes prioritarios reducen drásticamente su tiempo en cola W_q1 = W₀ / (1 - ρ₁), mientras que la clase regular experimenta W_q2 = W₀ / [(1 - ρ₁)(1 - ρ)].</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Pestaña 3: Origen de los Datos y Justificación de Parámetros -->
+        <div id="tab-justification" class="tab-content">
+          <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 10px; padding: 14px; margin-bottom: 18px;">
+            <h4 style="color: #38bdf8; font-size: 15px; margin-bottom: 6px;">📋 Declaración de Origen de Datos</h4>
+            <p style="font-size: 13px; color: #e2e8f0; line-height: 1.5;">
+              <strong>Tipo de Datos:</strong> <span style="color: #fbbf24; font-weight: bold;">DATOS SIMULADOS ESTOCÁSTICAMENTE</span>.
+              Los datos se generan mediante procesos de eventos discretos en Python utilizando la librería <strong>SimPy</strong>, calibrados con base en estudios de tiempos y movimientos y estándares operativos del Sistema General de Seguridad Social en Salud de Colombia (SGSSS).
+            </p>
+          </div>
+
+          <h4 style="color: #f8fafc; font-size: 14px; margin-bottom: 10px;">Justificación de los Parámetros del Modelo Matemático M/M/s:</h4>
+          
+          <table class="data-table" style="margin-bottom: 20px;">
+            <thead>
+              <tr>
+                <th style="width: 22%;">Parámetro</th>
+                <th style="width: 18%;">Valor Típico</th>
+                <th>Justificación Operativa y Sanitaria</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Ventanillas ($s$)</strong></td>
+                <td>3 a 5 ventanillas</td>
+                <td>Capacidad instalada habitual de puestos de admisiones en IPS de nivel I y II. Permite asegurar factor de utilización $\rho = \frac{\lambda}{s\mu} < 1$, previniendo saturación.</td>
+              </tr>
+              <tr>
+                <td><strong>Fichos Base a las 6:00 AM</strong></td>
+                <td>30 fichos</td>
+                <td>Capacidad estándar de agenda matutina presencial de médicos generales asignada por turno presencial para consulta externa o atención prioritaria.</td>
+              </tr>
+              <tr>
+                <td><strong>Tasa de Llegada ($\lambda$)</strong></td>
+                <td>15 - 30 pac/hora</td>
+                <td>Modela la concentración de pacientes entre las 05:00 AM y las 06:30 AM que llegan temprano a asegurar ficho de atención.</td>
+              </tr>
+              <tr>
+                <td><strong>Tiempo de Atención ($1/\mu$)</strong></td>
+                <td>7 minutos</td>
+                <td>Tiempo medio que tarda el recepcionista en verificar derechos en la BDUA/ADRES, cobrar cuota moderadora/copago, radicar orden y emitir volante de cita.</td>
+              </tr>
+              <tr>
+                <td><strong>Proporción Prioritaria</strong></td>
+                <td>20% - 30%</td>
+                <td>Proporción epidemiológica de adultos mayores, personas con discapacidad, gestantes y población vulnerable amparada por la <strong>Ley Estatutaria de Salud (Ley 1751 de 2015)</strong> y la <strong>Resolución 5596 de 2015</strong> de triage en Colombia.</td>
+              </tr>
+              <tr>
+                <td><strong>Excepción de Fichos Extras</strong></td>
+                <td>Variable</td>
+                <td>Garantiza el principio constitucional de accesibilidad y no discriminación. Ante la llegada de un paciente con discapacidad sin fichos disponibles, la IPS no rechaza la atención ni despoja a otros usuarios, sino que habilita sobrecupo asistencial controlado.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 14px;">
+            <h5 style="color: #38bdf8; font-size: 13px; margin-bottom: 6px;">Evaluación de Escenarios Comparativos:</h5>
+            <p style="font-size: 12px; color: #94a3b8; line-height: 1.5;">
+              El simulador permite alterar individualmente cada una de estas variables numéricas en el panel lateral para evaluar cómo reacciona el sistema ante cambios en la capacidad instalada ($s$), aumentos de demanda ($\lambda$) o variaciones en la eficiencia del personal ($\mu$).
+            </p>
+          </div>
+        </div>
+
+        <!-- Pestaña 4: Listado Detallado de Pacientes -->
+        <div id="tab-patients" class="tab-content">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <input type="text" id="patient-search" class="form-input" placeholder="🔍 Buscar por nombre, categoría o ficho..." style="max-width: 320px;">
+            <a href="/api/export/csv" class="btn-ctrl btn-primary-action" style="text-decoration: none;">📥 Exportar a Excel / CSV</a>
+          </div>
+          <div style="overflow-x: auto; max-height: 480px;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Paciente</th>
+                  <th>Categoría</th>
+                  <th>Ficho</th>
+                  <th>Espera Ficho</th>
+                  <th>Espera Recepción</th>
+                  <th>Ventanilla</th>
+                  <th>Servicio</th>
+                  <th>Total IPS</th>
+                </tr>
+              </thead>
+              <tbody id="patients-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controlador de la Aplicación -->
+  <script src="/static/js/ips_scene.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
