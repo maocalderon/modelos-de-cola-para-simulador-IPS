@@ -13,6 +13,7 @@ window.adjustNumberInput = function(id, delta) {
   val = Math.max(min, Math.min(max, val));
   val = Math.round(val * 10) / 10;
   input.value = val;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
 };
 
 class IPSSimulatorApp {
@@ -25,6 +26,7 @@ class IPSSimulatorApp {
     this.playbackSpeed = 1.0;
     this.audioEnabled = true;
     this.timerId = null;
+    this.configurationLocked = false;
 
     // Estado en tiempo de reproducción
     this.patientChairsMap = new Map(); // patient_id -> chairIndex
@@ -308,6 +310,7 @@ class IPSSimulatorApp {
   }
 
   async fetchAndRunSimulation() {
+    if (this.configurationLocked) return;
     this.pause();
     this.updateClock("05:00 AM", "FASE 1: LLEGADA Y FICHOS");
 
@@ -367,9 +370,8 @@ class IPSSimulatorApp {
         const cfgS = this.simData.config.num_servers;
 
         this.scene.buildDesks(cfgS);
-        const totalTickets = this.simData.summary.total_tokens_granted;
         const extraTickets = this.simData.summary.tokens_extra_distributed;
-        this.scene.buildWaitingAreaChairs(totalTickets, extraTickets); // una silla por ticket; extras prioritarios en ámbar
+        this.scene.buildWaitingAreaChairs(cfgK + extraTickets, extraTickets);
         this.scene.resetScene();
         this.patientChairsMap.clear();
 
@@ -388,6 +390,7 @@ class IPSSimulatorApp {
         if (logList) logList.innerHTML = "";
 
         // Iniciar reproducción
+        this.setConfigurationLocked(true);
         this.play();
       } else {
         alert("Error en la simulación: " + result.message);
@@ -424,6 +427,7 @@ class IPSSimulatorApp {
 
   resetSimulation() {
     this.pause();
+    this.setConfigurationLocked(false);
     this.currentEventIndex = 0;
     this.scene.resetScene();
     this.patientChairsMap.clear();
@@ -451,11 +455,13 @@ class IPSSimulatorApp {
       this.currentEventIndex++;
     }
     this.updateClock("12:00 PM", "SIMULACIÓN FINALIZADA");
+    this.setConfigurationLocked(false);
   }
 
   scheduleNextEvent() {
     if (!this.isPlaying || this.currentEventIndex >= this.events.length) {
       this.pause();
+      if (this.currentEventIndex >= this.events.length) this.setConfigurationLocked(false);
       return;
     }
 
@@ -465,6 +471,7 @@ class IPSSimulatorApp {
 
     if (this.currentEventIndex >= this.events.length) {
       this.pause();
+      this.setConfigurationLocked(false);
       return;
     }
 
@@ -478,6 +485,22 @@ class IPSSimulatorApp {
     this.timerId = setTimeout(() => {
       this.scheduleNextEvent();
     }, realDelay);
+  }
+
+  setConfigurationLocked(locked) {
+    this.configurationLocked = locked;
+    const ids = [
+      "param_mu", "param_lambda", "param_s", "param_k", "param_total_arrivals", "random_seed",
+      "chk-manual-priority", "prio_pct_regular", "prio_pct_elderly", "prio_pct_disability",
+      "prio_pct_pregnant", "prio_pct_vulnerable", "btn-run-sim", "btn-balance-100"
+    ];
+    ids.forEach(id => {
+      const control = document.getElementById(id);
+      if (control) control.disabled = locked;
+    });
+    document.querySelectorAll(".btn-step-num, .btn-scenario").forEach(button => {
+      button.disabled = locked;
+    });
   }
 
   processEvent(evt, isFastForward = false) {

@@ -205,6 +205,7 @@ class IPSScene {
     const backWall = new THREE.Mesh(backWallGeo, wallMat);
     backWall.position.set(0, 4, -24);
     backWall.receiveShadow = true;
+    this.backWallMesh = backWall;
     this.scene.add(backWall);
 
     // Paredes laterales
@@ -217,6 +218,21 @@ class IPSScene {
     rightWall.position.set(21, 4, -10);
     this.rightWallMesh = rightWall;
     this.scene.add(rightWall);
+    this.clinicRightEdge = 21;
+  }
+
+  expandClinicToRight(edge) {
+    this.clinicRightEdge = Math.max(this.clinicRightEdge || 21, edge);
+    const width = this.clinicRightEdge + 21;
+    if (this.floorInteriorMesh) {
+      this.floorInteriorMesh.scale.x = width / 42;
+      this.floorInteriorMesh.position.x = (this.clinicRightEdge - 21) / 2;
+    }
+    if (this.backWallMesh) {
+      this.backWallMesh.scale.x = width / 42;
+      this.backWallMesh.position.x = (this.clinicRightEdge - 21) / 2;
+    }
+    if (this.rightWallMesh) this.rightWallMesh.position.x = this.clinicRightEdge;
   }
 
   buildTokenKiosk() {
@@ -308,11 +324,7 @@ class IPSScene {
 
     const wingColumns = Math.ceil(Math.max(0, numChairs - 30) / 5);
     const rightEdge = Math.max(21, 14.4 + Math.max(0, wingColumns - 1) * 2.15);
-    if (this.floorInteriorMesh) {
-      this.floorInteriorMesh.scale.x = (rightEdge + 21) / 42;
-      this.floorInteriorMesh.position.x = (rightEdge - 21) / 2;
-    }
-    if (this.rightWallMesh) this.rightWallMesh.position.x = rightEdge;
+    this.expandClinicToRight(rightEdge);
 
     const chairMat = new THREE.MeshStandardMaterial({ color: 0x087f8c, roughness: 0.5 });
     const extraChairMat = new THREE.MeshStandardMaterial({ color: 0xe0a126, roughness: 0.48 });
@@ -378,12 +390,15 @@ class IPSScene {
     this.desks3D.forEach(d => this.scene.remove(d.group));
     this.desks3D = [];
 
-    const totalWidth = 32;
-    const spacing = totalWidth / (numServers + 1);
+    const firstDeskX = -8;
+    const spacing = 8;
+    const rightmostDeskX = firstDeskX + (numServers - 1) * spacing;
+    const addedDeskWing = 21 + Math.max(0, numServers - 3) * 8;
+    this.expandClinicToRight(Math.max(21, rightmostDeskX + 5, addedDeskWing));
 
     for (let i = 1; i <= numServers; i++) {
       const deskGroup = new THREE.Group();
-      const x = -totalWidth / 2 + i * spacing;
+      const x = firstDeskX + (i - 1) * spacing;
       const z = -20;
 
       // 1. Mostrador de recepción con ventanilla de vidrio
