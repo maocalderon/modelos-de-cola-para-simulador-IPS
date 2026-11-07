@@ -173,41 +173,18 @@ class IPSSimulation:
     def _handle_patient_arrival_to_token_queue(self, patient: Patient):
         """
         Regla de negocio IPS:
-        - Si los K fichos ya se agotaron y llega un prioritario: EXCEPCIÓN HUMANITARIA -> Ficho Extra (K+1).
-        - Si los K fichos ya se agotaron y llega un regular: RECHAZO -> Debe retirarse de la IPS.
+        - Si los K fichos ya se agotaron, cualquier paciente es rechazado.
         - Si aún hay fichos disponibles:
             - Prioritarios adelantan la fila hasta el frente.
             - Regulares se ubican al final.
         """
         if self.tokens_exhausted:
             if patient.is_priority:
-                # Excepción humanitaria: Ficho Extra
-                self.extra_tokens_count += 1
-                token_num = self.base_tokens + self.extra_tokens_count
-                patient.token_number = token_num
-                patient.is_extra_token = True
-                patient.token_assigned_time = self.env.now
-                patient.wait_time_token = patient.token_assigned_time - patient.arrival_gate_time
-                
-                self.log_event(
-                    "TOKEN_EXTRA_EXCEPTION",
-                    f"¡EXCEPCIÓN APLICADA! {patient.name} ({PRIORITY_LABELS.get(patient.category)}) llegó con tickets agotados. "
-                    f"Recibe Ficho Extra #{token_num} y entra a recepción.",
-                    patient=patient,
-                    extra_data={"token_number": token_num, "is_extra": True}
-                )
-                
+                self._assign_extra_token(patient, "llegó con los tickets base agotados")
                 if self.env.now >= 180:
                     self.env.process(self._patient_reception_process(patient))
             else:
-                # Regular llega tarde y no hay fichos -> Rechazado y se va de la IPS
-                patient.token_rejected = True
-                self.log_event(
-                    "TOKEN_REJECTED",
-                    f"❌ RECHAZADO: {patient.name} (Regular) llegó tarde. Los {self.base_tokens} tickets se agotaron. Se retira de la IPS.",
-                    patient=patient,
-                    extra_data={"departing": True, "reason": "TICKETS_EXHAUSTED"}
-                )
+                self._reject_patient(patient, "TICKETS_EXHAUSTED")
         else:
             # Los tickets aún están disponibles o aún no son las 6:00 AM
             if patient.is_priority:
@@ -270,31 +247,36 @@ class IPSSimulation:
             f"Se han entregado los {self.tokens_distributed} tickets base disponibles. Cupos de ventanilla cerrados."
         )
         
-        # A los pacientes que quedaron aún en fila al agotarse los K tickets
+        # Nadie en la fila puede recibir un ticket por encima del límite K.
         while len(self.token_queue) > 0:
             rem = self.token_queue.pop(0)
             if rem.is_priority:
-                # Excepción prioritaria
-                self.extra_tokens_count += 1
-                token_num = self.base_tokens + self.extra_tokens_count
-                rem.token_number = token_num
-                rem.is_extra_token = True
-                rem.token_assigned_time = self.env.now
-                rem.wait_time_token = rem.token_assigned_time - rem.arrival_gate_time
-                self.log_event(
-                    "TOKEN_EXTRA_EXCEPTION",
-                    f"¡EXCEPCIÓN APLICADA! {rem.name} ({rem.category}) en fila al agotarse cupos. Se le otorga Ficho Extra #{token_num}.",
-                    patient=rem,
-                    extra_data={"token_number": token_num, "is_extra": True}
-                )
+                self._assign_extra_token(rem, "estaba en la fila al agotarse los tickets base")
             else:
-                rem.token_rejected = True
-                self.log_event(
-                    "TOKEN_REJECTED",
-                    f"❌ RECHAZADO: {rem.name} (Regular) no alcanzó ticket base. Se retira de la IPS.",
-                    patient=rem,
-                    extra_data={"departing": True, "reason": "NO_TICKET_LEFT"}
-                )
+                self._reject_patient(rem, "NO_TICKET_LEFT")
+
+    def _assign_extra_token(self, patient: Patient, context: str):
+        self.extra_tokens_count += 1
+        token_num = self.base_tokens + self.extra_tokens_count
+        patient.token_number = token_num
+        patient.is_extra_token = True
+        patient.token_assigned_time = self.env.now
+        patient.wait_time_token = patient.token_assigned_time - patient.arrival_gate_time
+        self.log_event(
+            "TOKEN_EXTRA_EXCEPTION",
+            f"EXCEPCIÓN PRIORITARIA: {patient.name} {context}. Recibe el ticket extra #{token_num}.",
+            patient=patient,
+            extra_data={"token_number": token_num, "is_extra": True}
+        )
+
+    def _reject_patient(self, patient: Patient, reason: str):
+        patient.token_rejected = True
+        self.log_event(
+            "TOKEN_REJECTED",
+            f"RECHAZADO: {patient.name} no alcanzó uno de los {self.base_tokens} tickets y se retira de la IPS.",
+            patient=patient,
+            extra_data={"departing": True, "reason": reason}
+        )
 
     def _reception_opening_process(self):
         """A las 08:00 AM (minuto 180), abren las puertas de recepción M/M/s."""

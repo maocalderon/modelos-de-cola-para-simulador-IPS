@@ -330,6 +330,12 @@ class IPSSimulatorApp {
         EMBARAZADA:   parseFloat(document.getElementById("prio_pct_pregnant").value)   || 0,
         VULNERABLE:   parseFloat(document.getElementById("prio_pct_vulnerable").value) || 0
       };
+      const sum = Object.values(customDist).reduce((total, value) => total + value, 0);
+      if (Object.values(customDist).some(value => value < 0 || value > 100) || Math.abs(sum - 100) > 0.01) {
+        this._updatePrioBadge();
+        alert("La distribución manual debe sumar 100% y cada categoría debe estar entre 0% y 100%.");
+        return;
+      }
     }
 
     const payload = {
@@ -361,7 +367,9 @@ class IPSSimulatorApp {
         const cfgS = this.simData.config.num_servers;
 
         this.scene.buildDesks(cfgS);
-        this.scene.buildWaitingAreaChairs(cfgK);   // sillas = exactamente K tickets
+        const totalTickets = this.simData.summary.total_tokens_granted;
+        const extraTickets = this.simData.summary.tokens_extra_distributed;
+        this.scene.buildWaitingAreaChairs(totalTickets, extraTickets); // una silla por ticket; extras prioritarios en ámbar
         this.scene.resetScene();
         this.patientChairsMap.clear();
 
@@ -540,6 +548,11 @@ class IPSSimulatorApp {
           { x: sideOffset, y: 0, z: 55 }    // Sale completamente fuera de la escena
         ], () => {
           this.scene.removePatient3D(patientData.id);
+          const chairIdx = this.patientChairsMap.get(patientData.id);
+          if (chairIdx !== undefined && this.scene.waitingChairs[chairIdx]) {
+            this.scene.waitingChairs[chairIdx].occupiedBy = null;
+          }
+          this.patientChairsMap.delete(patientData.id);
         });
         break;
       }

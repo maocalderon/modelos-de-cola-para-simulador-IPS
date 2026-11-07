@@ -53,6 +53,18 @@ def run_simulation_api():
         custom_distribution = None
         if custom_priority_enabled:
             custom_distribution = data.get("custom_distribution", {})
+            if not isinstance(custom_distribution, dict):
+                raise ValueError("La distribución manual de prioridades no es válida.")
+            categories = ("REGULAR", "ADULTO_MAYOR", "DISCAPACIDAD", "EMBARAZADA", "VULNERABLE")
+            try:
+                percentages = [float(custom_distribution.get(category, -1)) for category in categories]
+            except (TypeError, ValueError):
+                raise ValueError("Cada porcentaje debe ser un número entre 0 y 100.")
+            if any(value < 0 or value > 100 for value in percentages):
+                raise ValueError("Cada porcentaje debe estar entre 0 y 100.")
+            if abs(sum(percentages) - 100) > 0.01:
+                raise ValueError("La distribución manual debe sumar exactamente 100%.")
+            custom_distribution = dict(zip(categories, percentages))
             
         seed_val = data.get("random_seed")
         random_seed = int(seed_val) if (seed_val is not None and str(seed_val).strip() != "") else None

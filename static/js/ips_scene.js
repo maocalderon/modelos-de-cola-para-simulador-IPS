@@ -115,14 +115,15 @@ class IPSScene {
     // Suelo interior pulido (Recepción)
     const floorInteriorGeo = new THREE.PlaneGeometry(42, 28);
     const floorInteriorMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
-      roughness: 0.35,
-      metalness: 0.2
+      color: 0xe8eef0,
+      roughness: 0.28,
+      metalness: 0.04
     });
     const floorInterior = new THREE.Mesh(floorInteriorGeo, floorInteriorMat);
     floorInterior.rotation.x = -Math.PI / 2;
     floorInterior.position.set(0, 0, -10);
     floorInterior.receiveShadow = true;
+    this.floorInteriorMesh = floorInterior;
     this.scene.add(floorInterior);
 
     // Suelo exterior pavimentado (Fila de Fichos 6:00 AM)
@@ -197,7 +198,7 @@ class IPSScene {
   }
 
   buildWalls() {
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xf4f7f6, roughness: 0.78 });
 
     // Pared de fondo (detrás de las ventanillas)
     const backWallGeo = new THREE.BoxGeometry(42, 8, 1);
@@ -214,6 +215,7 @@ class IPSScene {
 
     const rightWall = new THREE.Mesh(sideWallGeo, wallMat);
     rightWall.position.set(21, 4, -10);
+    this.rightWallMesh = rightWall;
     this.scene.add(rightWall);
   }
 
@@ -296,7 +298,7 @@ class IPSScene {
     }
   }
 
-  buildWaitingAreaChairs(numChairs = 30) {
+  buildWaitingAreaChairs(numChairs = 30, extraChairs = 0) {
     // Si ya existían sillas anteriores, se eliminan del escenario para regenerarlas exactamente igual al número de tickets
     if (this.chairGroupMesh) {
       this.scene.remove(this.chairGroupMesh);
@@ -304,10 +306,19 @@ class IPSScene {
     this.waitingChairs = [];
     this.chairGroupMesh = new THREE.Group();
 
-    const chairMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.5 });
+    const wingColumns = Math.ceil(Math.max(0, numChairs - 30) / 5);
+    const rightEdge = Math.max(21, 14.4 + Math.max(0, wingColumns - 1) * 2.15);
+    if (this.floorInteriorMesh) {
+      this.floorInteriorMesh.scale.x = (rightEdge + 21) / 42;
+      this.floorInteriorMesh.position.x = (rightEdge - 21) / 2;
+    }
+    if (this.rightWallMesh) this.rightWallMesh.position.x = rightEdge;
+
+    const chairMat = new THREE.MeshStandardMaterial({ color: 0x087f8c, roughness: 0.5 });
+    const extraChairMat = new THREE.MeshStandardMaterial({ color: 0xe0a126, roughness: 0.48 });
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.8 });
 
-    // 6 sillas por fila (3 a la izquierda del pasillo, 3 a la derecha)
+    // Base: seis sillas por fila. Las sillas sobre la capacidad base abren un ala hacia la derecha.
     const chairsPerRow = 6;
     const spacingX = 2.4;
     const spacingZ = 2.5;
@@ -317,25 +328,29 @@ class IPSScene {
     const legGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.7, 8);
 
     for (let i = 0; i < numChairs; i++) {
-      const row = Math.floor(i / chairsPerRow);
-      const col = i % chairsPerRow;
-
-      // Columna: 0, 1, 2 a la izquierda; 3, 4, 5 a la derecha
       let x;
-      if (col < 3) {
-        x = -1.6 - (2 - col) * spacingX;
+      let z;
+      if (i < 30) {
+        const row = Math.floor(i / chairsPerRow);
+        const col = i % chairsPerRow;
+        x = col < 3 ? -1.6 - (2 - col) * spacingX : 1.6 + (col - 3) * spacingX;
+        z = -4.0 - row * spacingZ;
       } else {
-        x = 1.6 + (col - 3) * spacingX;
+        const wingIndex = i - 30;
+        const wingCol = Math.floor(wingIndex / 5);
+        const wingRow = wingIndex % 5;
+        x = 13.4 + wingCol * 2.15;
+        z = -4.0 - wingRow * spacingZ;
       }
-      const z = -4.0 - row * spacingZ;
 
       const singleChair = new THREE.Group();
 
-      const seat = new THREE.Mesh(seatGeo, chairMat);
+      const seatMat = i >= numChairs - extraChairs ? extraChairMat : chairMat;
+      const seat = new THREE.Mesh(seatGeo, seatMat);
       seat.position.y = 0.7;
       singleChair.add(seat);
 
-      const back = new THREE.Mesh(backGeo, chairMat);
+      const back = new THREE.Mesh(backGeo, seatMat);
       back.position.set(0, 1.15, -0.42);
       singleChair.add(back);
 
@@ -373,12 +388,19 @@ class IPSScene {
 
       // 1. Mostrador de recepción con ventanilla de vidrio
       const counterGeo = new THREE.BoxGeometry(3.2, 2.2, 1.6);
-      const counterMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.4 });
+      const counterMat = new THREE.MeshStandardMaterial({ color: 0xf8faf9, roughness: 0.3, metalness: 0.04 });
       const counter = new THREE.Mesh(counterGeo, counterMat);
       counter.position.set(0, 1.1, 0);
       counter.castShadow = true;
       counter.receiveShadow = true;
       deskGroup.add(counter);
+
+      const accent = new THREE.Mesh(
+        new THREE.BoxGeometry(3.22, 0.16, 1.62),
+        new THREE.MeshStandardMaterial({ color: 0x087f8c, roughness: 0.32 })
+      );
+      accent.position.set(0, 0.25, 0);
+      deskGroup.add(accent);
 
       // Vidrio protector con orificio
       const glassGeo = new THREE.BoxGeometry(3.0, 2.2, 0.08);
@@ -395,7 +417,7 @@ class IPSScene {
 
       // Computador monitor
       const monGeo = new THREE.BoxGeometry(0.8, 0.6, 0.1);
-      const monMat = new THREE.MeshStandardMaterial({ color: 0x0f172a });
+      const monMat = new THREE.MeshStandardMaterial({ color: 0x243746 });
       const mon = new THREE.Mesh(monGeo, monMat);
       mon.position.set(0, 2.5, 0);
       deskGroup.add(mon);
@@ -522,10 +544,33 @@ class IPSScene {
   }
 
   buildClinicSigns() {
-    // Letrero decorativo en el pórtico superior (cuadro azul perfectamente ajustado al texto)
-    const bannerSprite = this.createTextSprite("IPS VIVA SALUD INTEGRAL - M/M/s RECEPCIÓN", "#ffffff", "#0284c7", "#38bdf8", 30);
-    bannerSprite.position.set(0, 6.8, 4);
-    this.scene.add(bannerSprite);
+    const sign = new THREE.Group();
+    const plaque = new THREE.Mesh(
+      new THREE.BoxGeometry(10, 2.2, 0.28),
+      new THREE.MeshStandardMaterial({ color: 0x087f8c, roughness: 0.35 })
+    );
+    sign.add(plaque);
+    const crossMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xb7f3e8, emissiveIntensity: 0.25 });
+    const crossVertical = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.45, 0.08), crossMat);
+    const crossHorizontal = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.42, 0.08), crossMat);
+    crossVertical.position.set(-3.7, 0.35, 0.19);
+    crossHorizontal.position.set(-3.7, 0.35, 0.19);
+    sign.add(crossVertical, crossHorizontal);
+    const name = this.createTextSprite("IPS VIVA SALUD INTEGRAL", "#ffffff", "#087f8c", null, 27);
+    name.position.set(0.65, 0.35, 0.2);
+    sign.add(name);
+    sign.position.set(0, 6.8, 4);
+    this.scene.add(sign);
+
+    const wallCross = new THREE.Group();
+    const tile = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 0.12), new THREE.MeshStandardMaterial({ color: 0x087f8c }));
+    const v = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.5, 0.08), crossMat);
+    const h = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.42, 0.08), crossMat);
+    v.position.z = 0.1;
+    h.position.z = 0.1;
+    wallCross.add(tile, v, h);
+    wallCross.position.set(-15.5, 5.1, -23.35);
+    this.scene.add(wallCross);
   }
 
   // --- Creación de Avatares 3D con Distinción Visual ---
