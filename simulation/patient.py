@@ -67,7 +67,7 @@ class Patient:
     is_extra_token: bool = False             # Si fue un ficho extra concedido por excepción prioritaria
     token_rejected: bool = False            # Si quedó sin ficho (rechazado por agotamiento)
     
-    # Fase de Recepción (desde las 08:00 AM = min 180)
+    # Ingreso a sala desde las 07:00 AM; ventanilla desde las 08:00 AM (min 180)
     reception_arrival_time: Optional[float] = None  # Ingreso a la sala de espera
     service_start_time: Optional[float] = None      # Inicio de atención en ventanilla
     service_end_time: Optional[float] = None        # Fin de atención
@@ -76,7 +76,8 @@ class Patient:
     
     # Métricas calculadas
     wait_time_token: float = 0.0             # Tiempo esperando en la fila exterior para ficho
-    wait_time_reception: float = 0.0         # Tiempo esperando en sala de recepción hasta ser llamado
+    wait_time_opening: float = 0.0           # Tiempo sentado antes de abrir ventanillas a las 08:00
+    wait_time_reception: float = 0.0         # Espera en cola después de abrir ventanillas
     total_time_in_system: float = 0.0        # Tiempo total transcurrido en el sistema
     
     def to_dict(self):
@@ -99,6 +100,7 @@ class Patient:
             "server_id": self.server_id,
             "service_duration": round(self.service_duration, 2),
             "wait_time_token": round(self.wait_time_token, 2),
+            "wait_time_opening": round(self.wait_time_opening, 2),
             "wait_time_reception": round(self.wait_time_reception, 2),
             "total_time_in_system": round(self.total_time_in_system, 2),
         }

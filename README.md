@@ -7,7 +7,7 @@ Un simulador interactivo en 3D para la gestión de colas en una **Institución P
 
 El flujo de atención **no es un M/M/s/K clásico**. SimPy genera llegadas con intervalos exponenciales y duraciones de servicio exponenciales, con `s` ventanillas y prioridad no apropiativa. La admisión es finita por una cuota de `K` tickets base; después se rechazan los regulares y se permiten tickets extra para prioridades. Además, se simula una jornada finita y no un régimen estacionario. Por estas reglas, la clasificación más precisa es una simulación de eventos discretos con capacidad de admisión limitada, prioridades y excepciones.
 
-La interfaz denomina `MU` a la tasa de llegada y `lambda` al tiempo promedio de servicio. Esa notación difiere de la convención usual de colas, donde `lambda` es tasa de llegada y `mu` tasa de servicio. Erlang-C M/M/s se conserva solo como referencia estacionaria aproximada; no modela directamente K ni las excepciones prioritarias.
+Los parámetros de entrada son `lambda` (tasa media de llegada por hora) y `mu` (tiempo medio de atención en minutos). SimPy genera un número aleatorio de llegadas exponenciales en la ventana 05:00-07:00; no se configura una cantidad de personas. Para la referencia teórica M/M/s, la tasa de servicio convencional se calcula como `60 / mu`. Erlang-C se conserva solo como referencia estacionaria aproximada; no modela directamente K ni las excepciones prioritarias.
 
 ---
 
@@ -15,9 +15,9 @@ La interfaz denomina `MU` a la tasa de llegada y `lambda` al tiempo promedio de 
 
 ### 1. Origen de los Datos
 - **Naturaleza:** **Datos Simulados Estocásticamente**.
-- **Generación:** Los datos se producen mediante variables aleatorias continuas y discretas generadas con la librería **SimPy** y **NumPy** en Python, siguiendo las distribuciones teóricas de la Teoría de Colas de Kendall:
+- **Generación:** Los datos se producen mediante procesos de eventos discretos de **SimPy** y muestreo aleatorio en Python, siguiendo las distribuciones de la Teoría de Colas de Kendall:
   - Llegadas de pacientes: Proceso estocástico de **Poisson** con tiempos entre arribos exponenciales con media $1/\lambda$.
-  - Tiempos de atención en ventanilla: Distribución **Exponencial** con tasa de servicio $\mu$ por ventanilla.
+  - Tiempos de atención en ventanilla: Distribución **Exponencial** con media igual al parámetro $\mu$ en minutos por ventanilla.
 - **Calibración:** Los parámetros base del modelo fueron calibrados a partir de los tiempos de referencia observados en centros de atención primaria del Sistema General de Seguridad Social en Salud de Colombia (SGSSS), alineados con la **Resolución 5596 de 2015 del Ministerio de Salud y Protección Social** (criterios de triage y atención preferente) y la **Ley Estatutaria de Salud (Ley 1751 de 2015)**.
 
 ### 2. Justificación de los Parámetros del Modelo Matemático
@@ -25,8 +25,8 @@ La interfaz denomina `MU` a la tasa de llegada y `lambda` al tiempo promedio de 
 |---|---|---|
 | **Ventanillas ($s$)** | $3$ servidores | Capacidad instalada estándar de módulos de recepción/facturación para una IPS de primer o segundo nivel, asegurando que la intensidad de tráfico $\rho = \frac{\lambda}{s\mu} < 1$ para evitar colapso del sistema. |
 | **Fichos Base a las 6:00 AM** | $30$ fichos | Representa la oferta diaria matutina de citas de consulta médica general disponibles para asignación presencial en el primer turno del día. |
-| **Tasa de Llegada ($\lambda$)** | $30$ pac/hora ($1/\lambda = 2.0$ min) | Modela la concentración de pacientes en la madrugada (05:00 AM a 06:30 AM) que hacen fila para asegurar su cupo. |
-| **Tiempo de Atención ($1/\mu$)** | $7.0$ minutos | Tiempo de ciclo promedio en ventanilla: validación de derechos en BDUA/ADRES, recaudación de copago o cuota moderadora, radicación y emisión de volante. |
+| **Tasa de Llegada ($\lambda$)** | $30$ pac/hora ($60/\lambda = 2.0$ min entre llegadas, en promedio) | Modela las llegadas aleatorias entre 05:00 AM y 07:00 AM para asegurar cupo. |
+| **Tiempo Medio de Atención ($\mu$ de entrada)** | $7.0$ minutos | Tiempo de ciclo promedio en ventanilla: validación de derechos en BDUA/ADRES, recaudación de copago o cuota moderadora, radicación y emisión de volante. La tasa teórica correspondiente es $60/7$ atenciones/hora. |
 | **Población Prioritaria** | $25\%$ de la demanda | Refleja la proporción de adultos mayores (60+), personas en situación de discapacidad, mujeres gestantes y personas vulnerables en el régimen subsidiado y contributivo. |
 | **Excepción de Fichos Extras** | Dinámica | Garantiza el mandato constitucional de no discriminación y eliminación de barreras administrativas: ante el arribo de un paciente discapacitado o vulnerable con fichos agotados, la IPS no rechaza al usuario ni despoja a los ya asignados, sino que genera un **Ficho Extra (#31+)**. |
 

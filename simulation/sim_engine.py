@@ -1,8 +1,8 @@
 """
 Motor de Simulación Discreta con SimPy para la IPS Viva Salud Integral.
 Parámetros en el orden especificado:
-1. MU (tasa de llegada)
-2. LAMBDA (tiempo promedio de atención en ventanilla)
+1. LAMBDA (tasa media de llegada)
+2. MU (tiempo promedio de atención en ventanilla)
 3. S (ventanillas de recepción / servidores)
 4. K (tickets / fichos base)
 
@@ -29,6 +29,11 @@ from .patient import (
 )
 from .queue_theory import calculate_mms_theory
 
+TOKEN_DISTRIBUTION_MINUTE = 60.0
+RECEPTION_OPEN_MINUTE = 120.0
+RECEPTION_SERVICE_START_MINUTE = 180.0
+ARRIVAL_WINDOW_END_MINUTE = RECEPTION_OPEN_MINUTE
+
 
 def minutes_to_clock(sim_minutes: float, start_hour: int = 5, start_minute: int = 0) -> str:
     """Convierte minutos de simulación a formato reloj 'HH:MM AM/PM'."""
@@ -49,21 +54,18 @@ def minutes_to_clock(sim_minutes: float, start_hour: int = 5, start_minute: int 
 class IPSSimulation:
     def __init__(
         self,
-        mu_arrival_rate: float = 30.0,        # 1. MU: Tasa de llegada (pacientes por hora)
-        lambda_service_time: float = 7.0,     # 2. LAMBDA: Tiempo promedio de atención (minutos)
+        lambda_arrival_rate: float = 30.0,    # 1. LAMBDA: tasa media de llegadas por hora
+        mu_service_time: float = 7.0,        # 2. MU: tiempo medio de atención en minutos
         num_servers: int = 3,                 # 3. S: Ventanillas de recepción (servidores paralelos)
         base_tokens: int = 30,                # 4. K: Cantidad de tickets / fichos base
-        total_arrivals: Optional[int] = None, # Total de personas que llegan a hacer la fila (ej. K + 15)
         custom_distribution: Optional[Dict[str, float]] = None, # Distribución manual o None para auto
         random_seed: Optional[int] = 42
     ):
-        # 1. MU: Tasa de llegada (pacientes por hora) -> intervalo promedio = 60 / mu minutos
-        self.mu_arrival_rate = max(1.0, float(mu_arrival_rate))
-        self.arrival_mean_interval = 60.0 / self.mu_arrival_rate
+        self.lambda_arrival_rate = max(1.0, float(lambda_arrival_rate))
+        self.arrival_mean_interval = 60.0 / self.lambda_arrival_rate
         
-        # 2. LAMBDA: Tiempo promedio de atención en ventanilla (minutos)
-        self.lambda_service_time = max(1.0, float(lambda_service_time))
-        self.service_mean_minutes = self.lambda_service_time
+        self.mu_service_time = max(1.0, float(mu_service_time))
+        self.service_mean_minutes = self.mu_service_time
         
         # 3. S: Ventanillas
         self.num_servers = max(1, int(num_servers))
@@ -71,12 +73,6 @@ class IPSSimulation:
         # 4. K: Tickets / fichos base
         self.base_tokens = max(1, int(base_tokens))
         
-        # Total de llegadas: por defecto k + 15 para simular fila completa y descartes
-        if total_arrivals is not None:
-            self.total_arrivals = max(self.base_tokens, int(total_arrivals))
-        else:
-            self.total_arrivals = self.base_tokens + 15
-            
         self.custom_distribution = custom_distribution
         self.random_seed = random_seed if random_seed is not None else random.SystemRandom().randrange(1, 2**32)
         self.rng = random.Random(self.random_seed)
@@ -84,6 +80,7 @@ class IPSSimulation:
         # SimPy Environment
         self.env = simpy.Environment()
         self.reception_servers = simpy.PriorityResource(self.env, capacity=self.num_servers)
+        self.reception_service_gate = self.env.event()
         
         # Estado de simulación
         self.patients: List[Patient] = []
@@ -92,6 +89,7 @@ class IPSSimulation:
         self.tokens_distributed = 0
         self.extra_tokens_count = 0
         self.tokens_exhausted = False
+        self.arrivals_finished = False
         
         # Ventanillas disponibles y estado
         self.server_busy_status = {i + 1: False for i in range(self.num_servers)}
@@ -141,27 +139,30 @@ class IPSSimulation:
         # 1. Proceso de llegadas estocásticas de pacientes
         self.env.process(self._arrivals_generator())
         
-        # 2. Proceso de inicio de reparto de fichos (06:00 AM = minuto 60)
+        # 2. Reparto de fichos a las 06:00 AM.
         self.env.process(self._token_distribution_process())
         
-        # 3. Proceso de apertura de recepción (08:00 AM = minuto 180)
+        # 3. Ingreso ordenado de 07:00 a 08:00; servicio desde las 08:00 AM.
         self.env.process(self._reception_opening_process())
         
         self.log_event("SIM_START", "05:00 AM: Inicia la jornada en la IPS Viva Salud Integral.")
-        self.env.run(until=900)
+        self.env.run()
         self.log_event("SIM_COMPLETE", "Jornada completada con éxito en la IPS.")
         
         return self._generate_summary_report()
 
     def _arrivals_generator(self):
-        """Genera llegadas con intervalo exponencial controlado por SimPy (tasa MU)."""
-        for i in range(1, self.total_arrivals + 1):
-            # Intervalo exponencial generado por SimPy
+        """Genera un total aleatorio de llegadas Poisson durante la ventana 05:00-07:00."""
+        patient_id = 0
+        while self.env.now < ARRIVAL_WINDOW_END_MINUTE:
             interval = self.rng.expovariate(1.0 / self.arrival_mean_interval)
+            if self.env.now + interval >= ARRIVAL_WINDOW_END_MINUTE:
+                yield self.env.timeout(ARRIVAL_WINDOW_END_MINUTE - self.env.now)
+                break
             yield self.env.timeout(interval)
-            
+            patient_id += 1
             patient = generate_patient(
-                patient_id=i,
+                patient_id=patient_id,
                 arrival_time=self.env.now,
                 custom_distribution=self.custom_distribution,
                 rng=self.rng
@@ -170,6 +171,11 @@ class IPSSimulation:
             
             # Gestión de la cola de fichos según prioridad o rechazo
             self._handle_patient_arrival_to_token_queue(patient)
+        self.arrivals_finished = True
+        self.log_event(
+            "ARRIVAL_WINDOW_CLOSED",
+            "07:00 AM: Cierra la ventana de llegadas; el total observado fue generado aleatoriamente por SimPy."
+        )
 
     def _handle_patient_arrival_to_token_queue(self, patient: Patient):
         """
@@ -182,7 +188,7 @@ class IPSSimulation:
         if self.tokens_exhausted:
             if patient.is_priority:
                 self._assign_extra_token(patient, "llegó con los tickets base agotados")
-                if self.env.now >= 180:
+                if self.env.now >= RECEPTION_OPEN_MINUTE:
                     self.env.process(self._patient_reception_process(patient))
             else:
                 self._reject_patient(patient, "TICKETS_EXHAUSTED")
@@ -215,15 +221,15 @@ class IPSSimulation:
 
     def _token_distribution_process(self):
         """A las 06:00 AM (minuto 60), se entregan los K tickets base."""
-        yield self.env.timeout(60.0)
+        yield self.env.timeout(TOKEN_DISTRIBUTION_MINUTE)
         self.log_event("TOKEN_DISTRIBUTION_START", "06:00 AM: Inicia el reparto de tickets en el módulo exterior.")
         
         while self.tokens_distributed < self.base_tokens:
             if len(self.token_queue) > 0:
                 patient = self.token_queue.pop(0)
                 
-                # Tiempo que tarda la entrega física del ticket (12 a 25 segundos)
-                handover_time = self.rng.uniform(0.2, 0.4)
+                # Cada ficho se entrega de forma breve para completar el reparto antes de las 07:00.
+                handover_time = self.rng.uniform(0.01, 0.02)
                 yield self.env.timeout(handover_time)
                 
                 self.tokens_distributed += 1
@@ -237,8 +243,10 @@ class IPSSimulation:
                     patient=patient,
                     extra_data={"token_number": patient.token_number}
                 )
+                if self.env.now >= RECEPTION_OPEN_MINUTE:
+                    self.env.process(self._patient_reception_process(patient))
             else:
-                if self.env.now >= 180:
+                if self.arrivals_finished:
                     break
                 yield self.env.timeout(1.0)
                 
@@ -280,13 +288,13 @@ class IPSSimulation:
         )
 
     def _reception_opening_process(self):
-        """A las 08:00 AM (minuto 180), abren las puertas de recepción M/M/s."""
-        if self.env.now < 180.0:
-            yield self.env.timeout(180.0 - self.env.now)
+        """A las 07:00 AM inicia el ingreso ordenado; a las 08:00 abre ventanilla."""
+        if self.env.now < RECEPTION_OPEN_MINUTE:
+            yield self.env.timeout(RECEPTION_OPEN_MINUTE - self.env.now)
             
         self.log_event(
             "RECEPTION_OPEN",
-            f"08:00 AM: Apertura de recepción. {self.num_servers} ventanillas habilitadas para atender a los pacientes con ticket."
+            "07:00 AM: Inicia el ingreso ordenado de pacientes; la atención en ventanilla comienza a las 08:00 AM."
         )
         
         patients_with_token = [
@@ -295,9 +303,20 @@ class IPSSimulation:
         ]
         patients_with_token.sort(key=lambda p: p.token_number if p.token_number else 999)
         
-        for patient in patients_with_token:
-            yield self.env.timeout(self.rng.uniform(0.05, 0.15))
+        admission_interval = 50.0 / max(1, len(patients_with_token))
+        for index, patient in enumerate(patients_with_token):
+            if index:
+                yield self.env.timeout(admission_interval)
             self.env.process(self._patient_reception_process(patient))
+
+        if self.env.now < RECEPTION_SERVICE_START_MINUTE:
+            yield self.env.timeout(RECEPTION_SERVICE_START_MINUTE - self.env.now)
+        self.log_event(
+            "RECEPTION_SERVICE_START",
+            f"08:00 AM: Inicia la atención en las {self.num_servers} ventanillas."
+        )
+        if not self.reception_service_gate.triggered:
+            self.reception_service_gate.succeed()
 
     def _patient_reception_process(self, patient: Patient):
         """Atención en ventanilla bajo disciplina de cola con prioridad estricta en SimPy."""
@@ -309,6 +328,9 @@ class IPSSimulation:
             f"{patient.name} ingresa a la sala de espera con Ticket #{patient.token_number}.",
             patient=patient
         )
+
+        if not self.reception_service_gate.triggered:
+            yield self.reception_service_gate
         
         # SimPy PriorityResource: prioridad 0 para prioritarios, prioridad 1 para regulares
         priority_rank = 0 if patient.is_priority else 1
@@ -317,7 +339,14 @@ class IPSSimulation:
             yield req
             
             patient.service_start_time = self.env.now
-            patient.wait_time_reception = patient.service_start_time - patient.reception_arrival_time
+            patient.wait_time_opening = max(
+                0.0,
+                min(patient.service_start_time, RECEPTION_SERVICE_START_MINUTE) - patient.reception_arrival_time
+            )
+            patient.wait_time_reception = patient.service_start_time - max(
+                patient.reception_arrival_time,
+                RECEPTION_SERVICE_START_MINUTE
+            )
             if patient.id in self.reception_waiting_list:
                 self.reception_waiting_list.remove(patient.id)
                 
@@ -335,7 +364,7 @@ class IPSSimulation:
                 extra_data={"desk_id": desk_id, "token_number": patient.token_number}
             )
             
-            # Duración del servicio exponencial con media lambda_service_time (manejada por SimPy)
+            # Duración exponencial con media mu_service_time (manejada por SimPy)
             service_duration = max(1.5, self.rng.expovariate(1.0 / self.service_mean_minutes))
             patient.service_duration = service_duration
             
@@ -383,8 +412,11 @@ class IPSSimulation:
         avg_wait_reception_all = sum(p.wait_time_reception for p in attended_patients) / len(attended_patients) if attended_patients else 0.0
         avg_wait_reception_prio = sum(p.wait_time_reception for p in priority_attended) / len(priority_attended) if priority_attended else 0.0
         avg_wait_reception_reg = sum(p.wait_time_reception for p in regular_attended) / len(regular_attended) if regular_attended else 0.0
+        avg_wait_opening_all = sum(p.wait_time_opening for p in attended_patients) / len(attended_patients) if attended_patients else 0.0
         avg_service_time = sum(p.service_duration for p in attended_patients) / len(attended_patients) if attended_patients else 0.0
         avg_total_system_time = sum(p.total_time_in_system for p in attended_patients) / len(attended_patients) if attended_patients else 0.0
+        avg_total_system_priority = sum(p.total_time_in_system for p in priority_attended) / len(priority_attended) if priority_attended else 0.0
+        avg_total_system_regular = sum(p.total_time_in_system for p in regular_attended) / len(regular_attended) if regular_attended else 0.0
 
         waits = [p.wait_time_reception for p in attended_patients]
         sorted_waits = sorted(waits)
@@ -401,8 +433,8 @@ class IPSSimulation:
 
         observed_minutes = max(
             (p.service_end_time for p in attended_patients if p.service_end_time is not None),
-            default=180.0
-        ) - 180.0
+            default=RECEPTION_SERVICE_START_MINUTE
+        ) - RECEPTION_SERVICE_START_MINUTE
         total_service_minutes = sum(p.service_duration for p in attended_patients)
         utilization = total_service_minutes / (observed_minutes * self.num_servers) if observed_minutes > 0 else 0.0
         arrival_count = len(self.patients)
@@ -413,7 +445,7 @@ class IPSSimulation:
         if utilization >= 0.85:
             recommendations.append("La utilización observada es alta. Evalúe abrir más ventanillas o reducir el tiempo promedio de atención y vuelva a comparar con la misma semilla.")
         if percentile(sorted_waits, 0.9) >= 60:
-            recommendations.append("El 10% de pacientes con mayor espera supera una hora. Revise la capacidad de atención y los horarios de llegada; pruebe aumentar S y compare el percentil 90.")
+            recommendations.append("El 10% de pacientes con mayor espera en la cola posterior a la apertura supera una hora. Revise la capacidad de atención; pruebe aumentar S y compare el percentil 90.")
         if rejection_rate >= 0.10:
             recommendations.append("La proporción de rechazos es relevante. Revise K y la oferta de cupos; los tickets extra prioritarios se contabilizan aparte.")
         if len(waits) >= 5 and wait_stddev > max(15.0, avg_wait_reception_all):
@@ -422,14 +454,14 @@ class IPSSimulation:
             recommendations.append("No aparecen alertas fuertes con estos umbrales en esta corrida. Compare varias semillas antes de tomar decisiones operativas.")
         
         # Teoría M/M/s:
-        # Tasa de servicio mu_theory (atenciones por hora por servidor) = 60 / lambda_service_time
+        # En teoría M/M/s, μ es una tasa; aquí se ingresa el tiempo medio, así que μ = 60 / tiempo.
         mu_service_rate_per_hour = 60.0 / self.service_mean_minutes
         
         # Proporción prioritaria observada
         priority_fraction = len(priority_attended) / len(attended_patients) if attended_patients else 0.25
         
         # Tasa de llegada efectiva
-        arrival_rate_theory = self.mu_arrival_rate
+        arrival_rate_theory = self.lambda_arrival_rate
         
         theory_metrics = calculate_mms_theory(
             arrival_rate=arrival_rate_theory,
@@ -444,11 +476,12 @@ class IPSSimulation:
             
         return {
             "config": {
-                "mu_arrival_rate": self.mu_arrival_rate,
-                "lambda_service_time": self.lambda_service_time,
+                "lambda_arrival_rate": self.lambda_arrival_rate,
+                "mu_service_time": self.mu_service_time,
                 "num_servers": self.num_servers,
                 "base_tokens": self.base_tokens,
-                "total_arrivals": self.total_arrivals,
+                "arrival_window_start": "05:00 AM",
+                "arrival_window_end": "07:00 AM",
                 "custom_distribution": self.custom_distribution,
                 "random_seed": self.random_seed
             },
@@ -470,8 +503,11 @@ class IPSSimulation:
                 "avg_wait_reception_all": round(avg_wait_reception_all, 2),
                 "avg_wait_reception_priority": round(avg_wait_reception_prio, 2),
                 "avg_wait_reception_regular": round(avg_wait_reception_reg, 2),
+                "avg_wait_opening_all": round(avg_wait_opening_all, 2),
                 "avg_service_time": round(avg_service_time, 2),
                 "avg_total_system_time": round(avg_total_system_time, 2),
+                "avg_total_system_priority": round(avg_total_system_priority, 2),
+                "avg_total_system_regular": round(avg_total_system_regular, 2),
                 "priority_benefit_percent": round(
                     ((avg_wait_reception_reg - avg_wait_reception_prio) / avg_wait_reception_reg) * 100, 1
                 ) if avg_wait_reception_reg > 0 else 0.0,

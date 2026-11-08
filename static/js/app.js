@@ -26,10 +26,28 @@ class IPSSimulatorApp {
     this.playbackSpeed = 1.0;
     this.audioEnabled = true;
     this.timerId = null;
+    this.clockTimerId = null;
     this.configurationLocked = false;
 
     // Estado en tiempo de reproducción
     this.patientChairsMap = new Map(); // patient_id -> chairIndex
+    this.entranceQueue = [];
+    this.entranceSequence = 0;
+    this.patientEntering = new Set();
+    this.deferredPatientMoves = new Map();
+    this.tokenArrivalQueue = [];
+    this.tokenLineEntering = false;
+    this.tokenLinePendingIds = new Set();
+    this.patientEnteredAt = new Map();
+    this.pendingPatientCalls = new Map();
+    this.pendingServiceEnds = new Map();
+    this.patientsAtDesk = new Set();
+    this.receptionCallQueue = [];
+    this.activeReceptionCall = null;
+    this.receptionReady = false;
+    this.receptionEntryPending = new Set();
+    this.receptionEnteredIds = new Set();
+    this.receptionSeatedIds = new Set();
 
     this.initAudio();
     this.bindDOM();
@@ -124,6 +142,12 @@ class IPSSimulatorApp {
   bindDOM() {
     // Formulario de parámetros y control de ejecución
     document.getElementById("btn-run-sim").addEventListener("click", () => this.fetchAndRunSimulation());
+    document.getElementById("btn-random-seed").addEventListener("click", () => {
+      const seed = new Uint32Array(1);
+      if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(seed);
+      else seed[0] = Math.floor(Math.random() * 0x7fffffff);
+      document.getElementById("random_seed").value = String(seed[0] & 0x7fffffff);
+    });
     document.getElementById("btn-play-pause").addEventListener("click", () => this.togglePlayPause());
     document.getElementById("btn-reset").addEventListener("click", () => this.resetSimulation());
     document.getElementById("btn-step").addEventListener("click", () => this.stepForward());
@@ -217,21 +241,18 @@ class IPSSimulatorApp {
         if (sc === "base") {
           document.getElementById("param_s").value = 3;
           document.getElementById("param_k").value = 30;
-          document.getElementById("param_total_arrivals").value = 45;
-          document.getElementById("param_mu").value = 30;
-          document.getElementById("param_lambda").value = 7.0;
+          document.getElementById("param_lambda").value = 30;
+          document.getElementById("param_mu").value = 7.0;
         } else if (sc === "optimized") {
           document.getElementById("param_s").value = 5;
           document.getElementById("param_k").value = 45;
-          document.getElementById("param_total_arrivals").value = 60;
-          document.getElementById("param_mu").value = 40;
-          document.getElementById("param_lambda").value = 5.0;
+          document.getElementById("param_lambda").value = 40;
+          document.getElementById("param_mu").value = 5.0;
         } else if (sc === "contingency") {
           document.getElementById("param_s").value = 2;
           document.getElementById("param_k").value = 20;
-          document.getElementById("param_total_arrivals").value = 35;
-          document.getElementById("param_mu").value = 20;
-          document.getElementById("param_lambda").value = 8.5;
+          document.getElementById("param_lambda").value = 20;
+          document.getElementById("param_mu").value = 8.5;
         }
         this.fetchAndRunSimulation();
       });
@@ -315,14 +336,13 @@ class IPSSimulatorApp {
   async fetchAndRunSimulation() {
     if (this.configurationLocked) return;
     this.pause();
-    this.updateClock("05:00 AM", "FASE 1: LLEGADA Y FICHOS");
+    this.updateClock("05:00 AM", "FASE 1: FILA PARA FICHOS");
 
     // ── Leer parámetros con los nuevos IDs ──────────────────────────────────
-    const mu      = parseFloat(document.getElementById("param_mu").value)             || 30;
-    const lambda  = parseFloat(document.getElementById("param_lambda").value)         || 7.0;
+    const lambda  = parseFloat(document.getElementById("param_lambda").value)         || 30;
+    const mu      = parseFloat(document.getElementById("param_mu").value)              || 7.0;
     const s       = parseInt(document.getElementById("param_s").value)                || 3;
     const k       = parseInt(document.getElementById("param_k").value)                || 30;
-    const total   = parseInt(document.getElementById("param_total_arrivals").value)   || 45;
     const seedRaw = document.getElementById("random_seed").value.trim();
 
     // ── Configuración de distribución de prioridades ─────────────────────────
@@ -345,11 +365,10 @@ class IPSSimulatorApp {
     }
 
     const payload = {
-      mu_arrival_rate:          mu,
-      lambda_service_time:      lambda,
+      lambda_arrival_rate:      lambda,
+      mu_service_time:          mu,
       num_servers:              s,
       base_tokens:              k,
-      total_arrivals:           total,
       custom_priority_enabled:  isManual,
       custom_distribution:      customDist,
       random_seed:              (seedRaw !== "" ? parseInt(seedRaw) : null)
@@ -367,14 +386,37 @@ class IPSSimulatorApp {
         this.simData = result.data;
         this.events = this.simData.events || [];
         this.currentEventIndex = 0;
+        this.receptionEntryPending = new Set(this.events
+          .filter(event => event.type === "PATIENT_ENTER_RECEPTION" && event.patient)
+          .map(event => event.patient.id));
+        this.receptionEnteredIds = new Set();
+        this.receptionSeatedIds = new Set();
+        this.receptionEntriesTotal = this.receptionEntryPending.size;
+        this.receptionEntriesSeated = 0;
+        this.receptionReady = this.receptionEntriesTotal === 0;
+        this.receptionCallQueue = [];
+        this.activeReceptionCall = null;
+        this.entranceQueue = [];
+        this.entranceSequence = 0;
+        this.entranceInProgress = false;
+        this.patientEntering.clear();
+        this.patientEnteredAt.clear();
+        this.tokenArrivalQueue = [];
+        this.tokenLineEntering = false;
+        this.tokenLinePendingIds.clear();
+        this.deferredPatientMoves.clear();
+        this.pendingPatientCalls.clear();
+        this.pendingServiceEnds.clear();
+        this.patientsAtDesk.clear();
 
         // Reconstruir ventanillas 3D y sillas según parámetros reales devueltos
         const cfgK = this.simData.config.base_tokens;
         const cfgS = this.simData.config.num_servers;
 
+        this.scene.resetClinicLayout();
         this.scene.buildDesks(cfgS);
         const extraTickets = this.simData.summary.tokens_extra_distributed;
-        this.scene.buildWaitingAreaChairs(cfgK + extraTickets, extraTickets);
+        this.scene.buildWaitingAreaChairs(Math.max(cfgK + extraTickets, this.receptionEntriesTotal), extraTickets);
         this.scene.resetScene();
         this.patientChairsMap.clear();
 
@@ -425,6 +467,8 @@ class IPSSimulatorApp {
   pause() {
     this.isPlaying = false;
     clearTimeout(this.timerId);
+    clearInterval(this.clockTimerId);
+    this.clockTimerId = null;
     const btn = document.getElementById("btn-play-pause");
     if (btn) btn.innerHTML = "▶ Continuar";
   }
@@ -435,7 +479,30 @@ class IPSSimulatorApp {
     this.currentEventIndex = 0;
     this.scene.resetScene();
     this.patientChairsMap.clear();
-    this.updateClock("05:00 AM", "FASE 1: LLEGADA Y FICHOS");
+    this.receptionEntryPending = new Set(this.events
+      .filter(event => event.type === "PATIENT_ENTER_RECEPTION" && event.patient)
+      .map(event => event.patient.id));
+    this.receptionEnteredIds.clear();
+    this.receptionSeatedIds.clear();
+    this.receptionEntriesTotal = this.receptionEntryPending.size;
+    this.receptionEntriesSeated = 0;
+    this.receptionReady = this.receptionEntriesTotal === 0;
+    this.receptionCallQueue = [];
+    this.activeReceptionCall = null;
+    this.patientEnteredAt.clear();
+    this.pendingPatientCalls.clear();
+    this.pendingServiceEnds.clear();
+    this.patientsAtDesk.clear();
+    this.deferredPatientMoves.clear();
+    this.entranceQueue = [];
+    this.entranceSequence = 0;
+    this.entranceInProgress = false;
+    this.patientEntering.clear();
+    this.deferredPatientMoves.clear();
+    this.tokenArrivalQueue = [];
+    this.tokenLinePendingIds.clear();
+    this.tokenLineEntering = false;
+    this.updateClock("05:00 AM", "FASE 1: FILA PARA FICHOS");
 
     const logList = document.getElementById("live-event-stream");
     if (logList) logList.innerHTML = "";
@@ -458,7 +525,8 @@ class IPSSimulatorApp {
       this.processEvent(this.events[this.currentEventIndex], true);
       this.currentEventIndex++;
     }
-    this.updateClock("12:00 PM", "SIMULACIÓN FINALIZADA");
+    const finalClock = this.events[this.events.length - 1]?.clock || document.getElementById("live-clock")?.textContent || "05:00 AM";
+    this.updateClock(finalClock, "SIMULACIÓN FINALIZADA");
     this.setConfigurationLocked(false);
   }
 
@@ -470,6 +538,7 @@ class IPSSimulatorApp {
     }
 
     const currentEvt = this.events[this.currentEventIndex];
+    if (currentEvt.type === "RECEPTION_SERVICE_START" && !this.receptionReady) this.finishReceptionAdmissions();
     this.processEvent(currentEvt);
     this.currentEventIndex++;
 
@@ -483,10 +552,21 @@ class IPSSimulatorApp {
     const nextEvt = this.events[this.currentEventIndex];
     const timeDeltaSim = Math.max(0.1, nextEvt.sim_time - currentEvt.sim_time);
 
-    // Factor base: 1 minuto simulado = 350ms a 1x velocidad
-    const realDelay = Math.max(40, (timeDeltaSim * 350) / this.playbackSpeed);
+    const playbackStart = performance.now();
+    const playbackStartSim = currentEvt.sim_time;
+    const playbackScale = 350 / this.playbackSpeed;
+    const realDelay = Math.max(40, timeDeltaSim * playbackScale);
+    clearInterval(this.clockTimerId);
+    this.clockTimerId = setInterval(() => {
+      if (!this.isPlaying) return;
+      const elapsedSim = Math.min(timeDeltaSim, (performance.now() - playbackStart) / playbackScale);
+      const displayedSim = playbackStartSim + elapsedSim;
+      this.updateClock(this.formatSimulationClock(displayedSim), this.phaseForSimTime(displayedSim));
+    }, 100);
 
     this.timerId = setTimeout(() => {
+      clearInterval(this.clockTimerId);
+      this.clockTimerId = null;
       this.scheduleNextEvent();
     }, realDelay);
   }
@@ -494,7 +574,7 @@ class IPSSimulatorApp {
   setConfigurationLocked(locked) {
     this.configurationLocked = locked;
     const ids = [
-      "param_mu", "param_lambda", "param_s", "param_k", "param_total_arrivals", "random_seed",
+      "param_mu", "param_lambda", "param_s", "param_k", "random_seed", "btn-random-seed",
       "chk-manual-priority", "prio_pct_regular", "prio_pct_elderly", "prio_pct_disability",
       "prio_pct_pregnant", "prio_pct_vulnerable", "btn-run-sim", "btn-balance-100"
     ];
@@ -508,8 +588,10 @@ class IPSSimulatorApp {
   }
 
   processEvent(evt, isFastForward = false) {
+    if (evt._deferredReplay) delete evt._deferredReplay;
+    else {
     // 1. Actualizar Reloj e Indicador de Fase
-    const phaseLabel = evt.sim_time < 180 ? "FASE 1: LLEGADA Y FICHOS (6:00 AM)" : "FASE 2: ATENCIÓN RECEPCIÓN (8:00 AM)";
+    const phaseLabel = evt.type === "SIM_COMPLETE" ? "SIMULACIÓN FINALIZADA" : this.phaseForSimTime(evt.sim_time);
     this.updateClock(evt.clock, phaseLabel);
 
     // 2. Actualizar HUD de estado en tiempo real
@@ -517,19 +599,19 @@ class IPSSimulatorApp {
       this.updateLiveCounters(evt.state);
     }
 
-    // 3. Agregar línea al Registro de Eventos
-    this.appendEventLog(evt);
+    // Las llamadas se registran cuando la animación realmente despacha al paciente.
+    if (evt.type !== "PATIENT_CALLED") this.appendEventLog(evt);
+    }
 
     // 4. Lógica de animación 3D
     const patientData = evt.patient;
 
     switch (evt.type) {
       case "PATIENT_ARRIVAL": {
-        // Paciente regular llega a la cola exterior
         const p3d = this.scene.getOrCreatePatient3D(patientData);
         const queuePos = (evt.extra_data && evt.extra_data.queue_position) || 1;
         const slot = this.scene.tokenQueueSlots[queuePos - 1] || new THREE.Vector3(0, 0, 15);
-        p3d.moveTo(slot.x, slot.y, slot.z);
+        this.enqueueTokenLineArrival(p3d, slot, patientData.id);
         break;
       }
 
@@ -538,7 +620,7 @@ class IPSSimulatorApp {
         const p3d = this.scene.getOrCreatePatient3D(patientData);
         const prioQueuePos = (evt.extra_data && evt.extra_data.queue_position) || 1;
         const slot = this.scene.tokenQueueSlots[prioQueuePos - 1] || new THREE.Vector3(0, 0, 12);
-        p3d.moveTo(slot.x, slot.y, slot.z);
+        this.enqueueTokenLineArrival(p3d, slot, patientData.id);
         break;
       }
 
@@ -546,8 +628,6 @@ class IPSSimulatorApp {
         // Recibe su ficho en el módulo exterior
         const p3d = this.scene.getOrCreatePatient3D(patientData);
         p3d.updateTagWithToken(patientData.token_number, false);
-        // Avanza un momento al mostrador de fichos
-        p3d.moveTo(0, 0, 9.8);
         break;
       }
 
@@ -556,7 +636,6 @@ class IPSSimulatorApp {
         if (!isFastForward) this.playChime(true);
         const p3d = this.scene.getOrCreatePatient3D(patientData);
         p3d.updateTagWithToken(patientData.token_number, true);
-        p3d.moveTo(0, 0, 9.8);
 
         // Notificación en el turnero
         this.scene.updateTurneroScreen("¡FICHO EXTRA!", `#${patientData.token_number}`, `${patientData.name} (${patientData.category})`, true);
@@ -585,22 +664,25 @@ class IPSSimulatorApp {
       }
 
       case "RECEPTION_OPEN": {
-        this.scene.updateTurneroScreen("RECEPCIÓN ABIERTA", "08:00 AM", "ATENCIÓN EN VENTANILLAS");
+        this.scene.updateTurneroScreen("INGRESO A SALA", "07:00 AM", "VENTANILLAS DESDE 08:00 AM");
+        break;
+      }
+
+      case "RECEPTION_SERVICE_START": {
+        this.scene.updateTurneroScreen("ATENCIÓN ABIERTA", "08:00 AM", "LLAMANDO POR ORDEN DE TURNO");
         break;
       }
 
       case "PATIENT_ENTER_RECEPTION": {
-        // Ingresa a la sala de espera y toma asiento libre
+        if (this.receptionEnteredIds.has(patientData.id) || !this.receptionEntryPending.has(patientData.id)) break;
+        this.receptionEnteredIds.add(patientData.id);
         const p3d = this.scene.getOrCreatePatient3D(patientData);
         const freeChairIdx = this.scene.waitingChairs.findIndex(c => c.occupiedBy === null);
         if (freeChairIdx !== -1) {
           this.scene.waitingChairs[freeChairIdx].occupiedBy = patientData.id;
           this.patientChairsMap.set(patientData.id, freeChairIdx);
           const chairPos = this.scene.waitingChairs[freeChairIdx].position;
-          p3d.moveTo(chairPos.x, 0, chairPos.z);
-        } else {
-          // Si no hay sillas libres, espera de pie en el pasillo
-          p3d.moveTo(-8 + Math.random() * 16, 0, -2);
+          this.enqueuePatientEntrance(patientData.id, p3d, chairPos, freeChairIdx);
         }
         break;
       }
@@ -611,33 +693,20 @@ class IPSSimulatorApp {
 
         const deskId = evt.desk_id || 1;
         const deskObj = this.scene.desks3D[deskId - 1];
-
-        // Liberar su silla de espera
-        const chairIdx = this.patientChairsMap.get(patientData.id);
-        if (chairIdx !== undefined && this.scene.waitingChairs[chairIdx]) {
-          this.scene.waitingChairs[chairIdx].occupiedBy = null;
-        }
-
-        // Actualizar Turnero 3D y de interfaz
-        const prioText = patientData.is_priority ? `[PRIORITARIO - ${patientData.category}]` : "GENERAL";
-        this.scene.updateTurneroScreen(`TURNO #${patientData.token_number}`, `VENTANILLA ${deskId}`, `${patientData.name} ${prioText}`, patientData.is_priority);
-        this.updateTurneroHUD(patientData, deskId);
-
-        // Actualizar Ventanilla 3D (Luz roja / ocupada)
         if (deskObj) {
-          deskObj.isBusy = true;
-          deskObj.beacon.material.color.setHex(0xef4444);
-          deskObj.beacon.material.emissive.setHex(0xef4444);
-          this.scene.updateSpriteText(deskObj.patientTag, `#${patientData.token_number} ${patientData.name.split(" ")[0]}`, "#fbbf24", "#78350f");
-
-          // Paciente camina hacia la ventanilla
           const p3d = this.scene.getOrCreatePatient3D(patientData);
-          p3d.moveTo(deskObj.frontPosition.x, deskObj.frontPosition.y, deskObj.frontPosition.z);
+          this.pendingPatientCalls.set(patientData.id, { patient: p3d, desk: deskObj, event: evt });
+          this.receptionCallQueue.push(patientData.id);
+          this.startNextReceptionCall();
         }
         break;
       }
 
       case "SERVICE_END": {
+        if (!this.patientsAtDesk.has(patientData.id)) {
+          this.pendingServiceEnds.set(patientData.id, evt);
+          break;
+        }
         // Fin de atención en ventanilla → paciente sale por la puerta de salida
         const deskId = evt.desk_id || 1;
         const deskObj = this.scene.desks3D[deskId - 1];
@@ -665,6 +734,7 @@ class IPSSimulatorApp {
           { x: -28, y: 0, z: 2 }    // Sale completamente fuera de la escena
         ], () => {
           this.scene.removePatient3D(patientData.id);
+          this.patientsAtDesk.delete(patientData.id);
           this.patientChairsMap.delete(patientData.id);
         });
         break;
@@ -672,11 +742,185 @@ class IPSSimulatorApp {
     }
   }
 
+  enqueuePatientEntrance(patientId, patient, chairPosition, chairIndex) {
+    const index = this.entranceSequence++;
+    this.entranceQueue.push({ patientId, patient, chairPosition, chairIndex });
+    this.patientEntering.add(patientId);
+    if (index > 0) {
+      const column = index % 5;
+      const row = Math.floor(index / 5);
+      patient.moveTo(-2.2 + column * 1.1, 0, 5.8 + row * 1.15);
+    }
+    this.startNextEntrance();
+  }
+
+  startNextEntrance() {
+    if (!this.entranceQueue.length || this.entranceInProgress) return;
+    this.entranceInProgress = true;
+    const next = this.entranceQueue[0];
+    next.patient.movementFactor = 0.88;
+    const extraWing = next.chairIndex >= 30;
+    const aisleX = extraWing ? 10.8 : 0;
+    const approachZ = next.chairPosition.z - 1.05;
+    const route = [
+      { x: -0.7, y: 0, z: 4.8 },
+      ...(extraWing ? [{ x: aisleX, y: 0, z: 4.8 }] : []),
+      { x: aisleX, y: 0, z: approachZ },
+      { x: next.chairPosition.x, y: 0, z: approachZ },
+      { x: next.chairPosition.x, y: 0, z: next.chairPosition.z }
+    ];
+    next.patient.walkPath(route, () => {
+      this.entranceQueue.shift();
+      this.patientEntering.delete(next.patientId);
+      this.entranceInProgress = false;
+      this.seatPatient(next);
+      this.startNextEntrance();
+    });
+  }
+
+  seatPatient(entry) {
+    if (this.receptionEntryPending.has(entry.patientId)) {
+      entry.patient.group.position.copy(entry.chairPosition);
+      entry.patient.targetPos.copy(entry.chairPosition);
+      entry.patient.waypoints = [];
+      entry.patient.onPathComplete = null;
+      entry.patient.group.rotation.y = Math.PI;
+      entry.patient.setSeated(true);
+      entry.patient.movementFactor = 0.08;
+      this.patientEntering.delete(entry.patientId);
+      this.patientEnteredAt.set(entry.patientId, Date.now());
+      this.receptionEntryPending.delete(entry.patientId);
+      this.receptionSeatedIds.add(entry.patientId);
+      this.receptionEntriesSeated = this.receptionSeatedIds.size;
+    }
+    if (this.receptionEntryPending.size === 0) {
+      this.receptionReady = true;
+      this.startNextReceptionCall();
+    }
+  }
+
+  finishReceptionAdmissions() {
+    const pending = this.entranceQueue.splice(0);
+    this.entranceInProgress = false;
+    pending.forEach(entry => this.seatPatient(entry));
+    this.receptionReady = true;
+    this.startNextReceptionCall();
+  }
+
+  startPatientCall(patientId) {
+    if (!this.receptionCallQueue.includes(patientId)) this.receptionCallQueue.push(patientId);
+    this.startNextReceptionCall();
+  }
+
+  startNextReceptionCall() {
+    if (!this.receptionReady || this.activeReceptionCall !== null || !this.receptionCallQueue.length) return;
+    const patientId = this.receptionCallQueue.shift();
+    const call = this.pendingPatientCalls.get(patientId);
+    if (!call) return this.startNextReceptionCall();
+    this.activeReceptionCall = patientId;
+    const patient = call.event.patient;
+    const deskId = call.event.desk_id || 1;
+    const prioText = patient.is_priority ? `[PRIORITARIO - ${patient.category}]` : "GENERAL";
+    this.scene.updateTurneroScreen(`TURNO #${patient.token_number}`, `VENTANILLA ${deskId}`, `${patient.name} ${prioText}`, patient.is_priority);
+    this.updateTurneroHUD(patient, deskId);
+    call.desk.isBusy = true;
+    call.desk.beacon.material.color.setHex(0xef4444);
+    call.desk.beacon.material.emissive.setHex(0xef4444);
+    this.scene.updateSpriteText(call.desk.patientTag, `#${patient.token_number} ${patient.name.split(" ")[0]}`, "#fbbf24", "#78350f");
+    this.appendEventLog(call.event);
+    const dwell = 0;
+    setTimeout(() => {
+      const chairIdx = this.patientChairsMap.get(patientId);
+      if (chairIdx !== undefined && this.scene.waitingChairs[chairIdx]) this.scene.waitingChairs[chairIdx].occupiedBy = null;
+      call.patient.setSeated(false);
+      call.patient.walkPath([{ x: call.desk.frontPosition.x, y: call.desk.frontPosition.y, z: call.desk.frontPosition.z }], () => {
+        this.patientsAtDesk.add(patientId);
+        this.pendingPatientCalls.delete(patientId);
+        this.appendEventLog({
+          type: "PATIENT_REGISTERED",
+          clock: call.event.clock,
+          message: `${patient.name} se registra en Ventanilla ${deskId}`
+        });
+        const serviceEnd = this.pendingServiceEnds.get(patientId);
+        if (serviceEnd) {
+          this.pendingServiceEnds.delete(patientId);
+          serviceEnd._deferredReplay = true;
+          this.processEvent(serviceEnd, true);
+        }
+        this.activeReceptionCall = null;
+        setTimeout(() => this.startNextReceptionCall(), 300);
+      });
+    }, dwell);
+  }
+
+  enqueueTokenLineArrival(patient, target, patientId) {
+    this.tokenArrivalQueue.push({ patient, target, patientId });
+    this.tokenLinePendingIds.add(patientId);
+    if (!this.tokenLineEntering) this.startNextTokenLineArrival();
+  }
+
+  startNextTokenLineArrival() {
+    if (!this.tokenArrivalQueue.length || this.tokenLineEntering) return;
+    this.tokenLineEntering = true;
+    const next = this.tokenArrivalQueue.shift();
+    next.patient.movementFactor = 0.24;
+    next.patient.walkPath([
+      { x: 0, y: 0, z: 26 },
+      { x: next.target.x, y: 0, z: 20 },
+      { x: next.target.x, y: 0, z: next.target.z }
+    ], () => {
+      next.patient.movementFactor = 0.08;
+      this.tokenLinePendingIds.delete(next.patientId);
+      this.tokenLineEntering = false;
+      this.startNextTokenLineArrival();
+    });
+  }
+
+  enqueueTokenPickup(patient, patientData, isExtra) {
+    this.tokenPickupQueue = this.tokenPickupQueue || [];
+    this.tokenPickupQueue.push({ patient, patientData, isExtra });
+    this.startNextTokenPickup();
+  }
+
+  startNextTokenPickup() {
+    if (this.tokenPickupInProgress || !this.tokenPickupQueue || !this.tokenPickupQueue.length) return;
+    this.tokenPickupInProgress = true;
+    const next = this.tokenPickupQueue.shift();
+    next.patient.walkPath([
+      { x: next.patient.group.position.x, y: 0, z: 14 },
+      { x: 0, y: 0, z: 9.8 }
+    ], () => {
+      next.patient.updateTagWithToken(next.patientData.token_number, next.isExtra);
+      next.patient.walkPath([
+        { x: -13, y: 0, z: 11 + (next.patientData.id % 4) * 1.2 }
+      ], () => {
+        this.tokenPickupInProgress = false;
+        this.startNextTokenPickup();
+      });
+    });
+  }
+
   updateClock(clockText, phaseText) {
     const clockEl = document.getElementById("live-clock");
     const phaseEl = document.getElementById("live-phase");
     if (clockEl) clockEl.textContent = clockText;
     if (phaseEl) phaseEl.textContent = phaseText;
+  }
+
+  formatSimulationClock(simMinutes) {
+    const totalMinutes = 5 * 60 + Math.round(simMinutes);
+    const hours24 = Math.floor(totalMinutes / 60) % 24;
+    const minutes = totalMinutes % 60;
+    const period = hours24 < 12 ? "AM" : "PM";
+    const hours12 = hours24 % 12 || 12;
+    return `${String(hours12).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${period}`;
+  }
+
+  phaseForSimTime(simMinutes) {
+    if (simMinutes < 60) return "FASE 1: FILA PARA FICHOS";
+    if (simMinutes < 120) return "FASE 2: REPARTO DE FICHOS (06:00-07:00 AM)";
+    if (simMinutes < 180) return "FASE 3: INGRESO A SALA (07:00-08:00 AM)";
+    return "FASE 4: ATENCIÓN EN VENTANILLA (DESDE 08:00 AM)";
   }
 
   updateTurneroHUD(patient, deskId) {
@@ -764,7 +1008,7 @@ class IPSSimulatorApp {
       this.chartWait = new Chart(ctxWait, {
         type: "bar",
         data: {
-          labels: ["Espera Ficho (6 AM)", "Espera Recepción (8 AM)", "Tiempo Total en IPS"],
+          labels: ["Espera Ficho", "Espera Turno (desde 8 AM)", "Tiempo Total en IPS"],
           datasets: [
             { label: "Pacientes Prioritarios", data: [0, 0, 0], backgroundColor: "#fbbf24" },
             { label: "Pacientes Regulares", data: [0, 0, 0], backgroundColor: "#38bdf8" }
@@ -806,12 +1050,12 @@ class IPSSimulatorApp {
       this.chartWait.data.datasets[0].data = [
         kpi.avg_wait_token_priority,
         kpi.avg_wait_reception_priority,
-        Math.round((kpi.avg_wait_token_priority + kpi.avg_wait_reception_priority + kpi.avg_service_time) * 10) / 10
+        kpi.avg_total_system_priority
       ];
       this.chartWait.data.datasets[1].data = [
         kpi.avg_wait_token_regular,
         kpi.avg_wait_reception_regular,
-        Math.round((kpi.avg_wait_token_regular + kpi.avg_wait_reception_regular + kpi.avg_service_time) * 10) / 10
+        kpi.avg_total_system_regular
       ];
       this.chartWait.update();
     }
@@ -850,7 +1094,7 @@ class IPSSimulatorApp {
           <span class="kpi-val highlight-blue">${theory.p0_percent}%</span>
         </div>
         <div class="kpi-card">
-          <span class="kpi-label">Prob. Esperar en Cola C(s, λ/μ)</span>
+          <span class="kpi-label">Prob. Esperar en Cola C(s, λ/μ<sub>tasa</sub>)</span>
           <span class="kpi-val highlight-gold">${theory.prob_wait_percent}%</span>
         </div>
         <div class="kpi-card">
@@ -896,9 +1140,9 @@ class IPSSimulatorApp {
       <p>${escape(analysis.model)}</p>
       <div class="kpi-grid" style="margin:14px 0;">
         <div class="kpi-card"><span class="kpi-label">Utilización observada</span><span class="kpi-val">${k.observed_utilization_percent}%</span></div>
-        <div class="kpi-card"><span class="kpi-label">Espera mediana (P50)</span><span class="kpi-val">${k.wait_reception_p50} min</span></div>
-        <div class="kpi-card"><span class="kpi-label">Espera P90 / P95</span><span class="kpi-val">${k.wait_reception_p90} / ${k.wait_reception_p95} min</span></div>
-        <div class="kpi-card"><span class="kpi-label">Espera máxima</span><span class="kpi-val">${k.wait_reception_max} min</span></div>
+        <div class="kpi-card"><span class="kpi-label">Cola tras apertura (P50)</span><span class="kpi-val">${k.wait_reception_p50} min</span></div>
+        <div class="kpi-card"><span class="kpi-label">Cola tras apertura (P90 / P95)</span><span class="kpi-val">${k.wait_reception_p90} / ${k.wait_reception_p95} min</span></div>
+        <div class="kpi-card"><span class="kpi-label">Máxima cola tras apertura</span><span class="kpi-val">${k.wait_reception_max} min</span></div>
         <div class="kpi-card"><span class="kpi-label">Dispersión de espera</span><span class="kpi-val">${k.wait_reception_stddev} min</span></div>
         <div class="kpi-card"><span class="kpi-label">Rechazo / productividad</span><span class="kpi-val">${k.rejection_rate_percent}% / ${k.throughput_per_hour} pac/h</span></div>
       </div>
@@ -914,16 +1158,18 @@ class IPSSimulatorApp {
     const k = data.kpi_simulated;
     const rows = [
       ["Semilla", data.config.random_seed],
-      ["MU - tasa llegada (pacientes/h)", data.config.mu_arrival_rate],
-      ["Lambda - atención media (min)", data.config.lambda_service_time],
+      ["Lambda - tasa media de llegada (pacientes/h)", data.config.lambda_arrival_rate],
+      ["MU - tiempo medio de atención (min)", data.config.mu_service_time],
       ["S - ventanillas", data.config.num_servers],
       ["K - tickets base", data.config.base_tokens],
       ["Llegadas generadas", data.summary.total_patients_arrived],
+      ["Ventana de llegadas", `${data.config.arrival_window_start} - ${data.config.arrival_window_end}`],
       ["Atendidos", data.summary.total_attended],
       ["Rechazados", data.summary.total_rejected],
-      ["Espera promedio recepción (min)", k.avg_wait_reception_all],
-      ["Espera P50 / P90 / P95 (min)", `${k.wait_reception_p50} / ${k.wait_reception_p90} / ${k.wait_reception_p95}`],
-      ["Espera máxima (min)", k.wait_reception_max],
+      ["Espera media en cola tras apertura (min)", k.avg_wait_reception_all],
+      ["Espera media preapertura (min)", k.avg_wait_opening_all],
+      ["Cola tras apertura P50 / P90 / P95 (min)", `${k.wait_reception_p50} / ${k.wait_reception_p90} / ${k.wait_reception_p95}`],
+      ["Máxima cola tras apertura (min)", k.wait_reception_max],
       ["Desviación estándar espera (min)", k.wait_reception_stddev],
       ["Utilización observada (%)", k.observed_utilization_percent],
       ["Tasa de rechazo (%)", k.rejection_rate_percent],
@@ -979,6 +1225,7 @@ class IPSSimulatorApp {
         <td><span class="badge-prio ${badgeClass}">${p.icon} ${p.category_label}</span></td>
         <td>${tokenDisplay}</td>
         <td>${p.wait_time_token} min</td>
+        <td>${p.wait_time_opening} min</td>
         <td>${p.wait_time_reception} min</td>
         <td>${p.server_id ? `Ventanilla ${p.server_id}` : '-'}</td>
         <td>${p.service_duration} min</td>

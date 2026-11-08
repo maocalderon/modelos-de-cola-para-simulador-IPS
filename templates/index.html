@@ -6,7 +6,7 @@
   <title>Simulador 3D IPS - Simulación de capacidad finita con prioridades</title>
   
   <!-- Estilos -->
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=20261108-2">
   
   <!-- Three.js y OrbitControls (Locales) -->
   <script src="/static/js/three.min.js"></script>
@@ -47,7 +47,7 @@
       <div class="clock-display">
         <span style="font-size: 15px;">🕒</span>
         <span id="live-clock" class="clock-text">05:00 AM</span>
-        <span id="live-phase" class="phase-indicator phase-fichos">FASE 1: LLEGADA Y FICHOS</span>
+        <span id="live-phase" class="phase-indicator phase-fichos">FASE 1: FILA PARA FICHOS</span>
       </div>
 
       <!-- Botones de Control de Tiempo -->
@@ -116,30 +116,30 @@
         </div>
       </div>
 
-      <!-- 1. MU: Tasa de llegada -->
-      <div class="form-group">
-        <label class="form-label" for="param_mu">
-          <span>1. μ (Tasa de Llegada - Pacientes/Hora):</span>
-        </label>
-        <div class="number-input-group">
-          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_mu', -2)">−</button>
-          <input type="number" id="param_mu" class="form-input-number" min="5" max="120" value="30" step="1">
-          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_mu', 2)">+</button>
-        </div>
-        <small class="field-hint">Tasa de llegada de pacientes (media entre llegadas 60/μ min calculada por SimPy)</small>
-      </div>
-
-      <!-- 2. LAMBDA: Tiempo promedio de atención -->
+      <!-- 1. Lambda: Tasa media de llegada -->
       <div class="form-group">
         <label class="form-label" for="param_lambda">
-          <span>2. λ (Tiempo Promedio de Atención en Ventanilla):</span>
+          <span>1. λ (Tasa Media de Llegada - Pacientes/Hora):</span>
         </label>
         <div class="number-input-group">
-          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_lambda', -0.5)">−</button>
-          <input type="number" id="param_lambda" class="form-input-number" min="1.0" max="30.0" value="7.0" step="0.5">
-          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_lambda', 0.5)">+</button>
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_lambda', -2)">−</button>
+          <input type="number" id="param_lambda" class="form-input-number" min="1" max="120" value="30" step="1">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_lambda', 2)">+</button>
         </div>
-        <small class="field-hint">Minutos de atención en taquilla (distribución exponencial gestionada por SimPy)</small>
+        <small class="field-hint">SimPy genera llegadas aleatorias con intervalo exponencial; la ventana de llegada es de 05:00 a 07:00.</small>
+      </div>
+
+      <!-- 2. Mu: Tiempo promedio de atención -->
+      <div class="form-group">
+        <label class="form-label" for="param_mu">
+          <span>2. μ (Tiempo Promedio de Atención - Minutos):</span>
+        </label>
+        <div class="number-input-group">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_mu', -0.5)">−</button>
+          <input type="number" id="param_mu" class="form-input-number" min="1.0" max="30.0" value="7.0" step="0.5">
+          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_mu', 0.5)">+</button>
+        </div>
+        <small class="field-hint">Duración de servicio exponencial, muestreada por SimPy alrededor de este promedio.</small>
       </div>
 
       <!-- 3. S: Ventanillas de recepción -->
@@ -158,27 +158,14 @@
       <!-- 4. K: Tickets / fichos base -->
       <div class="form-group">
         <label class="form-label" for="param_k">
-          <span>4. k (Cantidad de Tickets / Fichos Base):</span>
+          <span>4. K (Capacidad del Sistema / Fichos):</span>
         </label>
         <div class="number-input-group">
           <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_k', -5)">−</button>
           <input type="number" id="param_k" class="form-input-number" min="5" max="100" value="30" step="1">
           <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_k', 5)">+</button>
         </div>
-        <small class="field-hint">Total de tickets y cantidad idéntica equivalente de sillas en sala de espera</small>
-      </div>
-
-      <!-- Total de Personas que Llegan a la Fila -->
-      <div class="form-group">
-        <label class="form-label" for="param_total_arrivals">
-          <span>Total de Personas que Llegan a la Fila:</span>
-        </label>
-        <div class="number-input-group">
-          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_total_arrivals', -5)">−</button>
-          <input type="number" id="param_total_arrivals" class="form-input-number" min="10" max="250" value="45" step="1">
-          <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_total_arrivals', 5)">+</button>
-        </div>
-        <small class="field-hint">Los que lleguen después de los k tickets son rechazados con animación de salida</small>
+        <small class="field-hint">Capacidad máxima admitida: K fichos y K sillas base en la sala de espera.</small>
       </div>
 
       <!-- Configuración de Disciplina de Cola y Prioridades (Auto SimPy vs Manual 100%) -->
@@ -232,7 +219,10 @@
         <label class="form-label" for="random_seed">
           <span>Semilla Aleatoria (Seed Opcional):</span>
         </label>
-        <input type="number" id="random_seed" class="form-input" placeholder="Ej: 42 (deja vacío para aleatorio)" value="42">
+        <div class="seed-input-row">
+          <input type="number" id="random_seed" class="form-input" placeholder="Ej: 42 (deja vacío para aleatorio)" value="42">
+          <button type="button" id="btn-random-seed" class="btn-ctrl" title="Generar una semilla aleatoria">🎲 Generar semilla</button>
+        </div>
         <small class="field-hint">Para reproducir exactamente los mismos experimentos</small>
       </div>
 
@@ -293,14 +283,14 @@
       <!-- Métricas Globales de Espera Calculadas por SimPy -->
       <div class="kpi-summary-box">
         <div class="kpi-summary-header">
-          Tiempos Promedio de Espera (SimPy)
+          Espera promedio después de abrir ventanillas (SimPy)
         </div>
         <div class="kpi-row">
-          <span>Espera Recepción Prioritario:</span>
+          <span>Cola tras apertura · Prioritario:</span>
           <strong id="kpi-wait-recep-prio" style="color: #fbbf24;">0.0 min</strong>
         </div>
         <div class="kpi-row">
-          <span>Espera Recepción Regular:</span>
+          <span>Cola tras apertura · Regular:</span>
           <strong id="kpi-wait-recep-reg" style="color: #38bdf8;">0.0 min</strong>
         </div>
         <div class="kpi-row">
@@ -392,10 +382,10 @@
             <p>
               Erlang-C modela llegadas Poisson, servicio exponencial y una cola ilimitada en régimen estacionario. Este simulador representa una jornada finita con tickets K, prioridades y excepciones; por eso estas fórmulas son solo una referencia y no una predicción directa.
             </p>
-            <p style="margin-top:8px"><strong>Nota de notación:</strong> en el panel, MU representa la tasa de llegada y lambda el tiempo promedio de servicio. Es una notación propia de esta interfaz; la convención teórica habitual usa lambda para tasa de llegada y mu para tasa de servicio.</p>
+            <p style="margin-top:8px"><strong>Nota de notación:</strong> los parámetros de entrada son λ (tasa de llegadas) y μ (tiempo medio de atención). En las fórmulas M/M/s, la tasa de servicio convencional se obtiene como μ<sub>tasa</sub> = 60 / μ<sub>minutos</sub>.</p>
             <ul style="margin-left: 20px; margin-top: 8px;">
-              <li><strong>Intensidad de tráfico:</strong> ρ = λ / (s · μ). Para estabilidad se requiere ρ &lt; 1.</li>
-              <li><strong>Probabilidad de cola (Erlang-C):</strong> P(Espera &gt; 0) = C(s, λ/μ) = [ (λ/μ)^s / (s!(1-ρ)) ] · P₀</li>
+              <li><strong>Intensidad de tráfico:</strong> ρ = λ / (s · μ<sub>tasa</sub>). Para estabilidad se requiere ρ &lt; 1.</li>
+              <li><strong>Probabilidad de cola (Erlang-C):</strong> P(Espera &gt; 0) = C(s, λ/μ<sub>tasa</sub>) = [ (λ/μ<sub>tasa</sub>)^s / (s!(1-ρ)) ] · P₀</li>
               <li><strong>Modelo de Prioridades No Apropiativas (Cobham):</strong> Los pacientes prioritarios reducen drásticamente su tiempo en cola W_q1 = W₀ / (1 - ρ₁), mientras que la clase regular experimenta W_q2 = W₀ / [(1 - ρ₁)(1 - ρ)].</li>
             </ul>
           </div>
@@ -478,7 +468,8 @@
                   <th>Categoría</th>
                   <th>Ficho</th>
                   <th>Espera Ficho</th>
-                  <th>Espera Recepción</th>
+                  <th>Espera Preapertura</th>
+                  <th>Cola Ventanilla</th>
                   <th>Ventanilla</th>
                   <th>Servicio</th>
                   <th>Total IPS</th>
@@ -493,7 +484,7 @@
   </div>
 
   <!-- Controlador de la Aplicación -->
-  <script src="/static/js/ips_scene.js?v=20261107-3"></script>
-  <script src="/static/js/app.js?v=20261107-5"></script>
+  <script src="/static/js/ips_scene.js?v=20261108-21"></script>
+  <script src="/static/js/app.js?v=20261108-20"></script>
 </body>
 </html>

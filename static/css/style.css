@@ -558,6 +558,20 @@ body {
   border-color: #38bdf8;
 }
 
+.seed-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.seed-input-row .btn-ctrl {
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .business-rule-note {
   background: rgba(2, 132, 199, 0.12);
   border: 1px solid rgba(2, 132, 199, 0.3);

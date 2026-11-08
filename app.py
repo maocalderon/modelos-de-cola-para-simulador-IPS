@@ -33,20 +33,16 @@ def run_simulation_api():
     try:
         data = request.get_json() or {}
         
-        # 1. MU: Tasa de llegada (pacientes por hora)
-        mu_arrival_rate = float(data.get("mu_arrival_rate", data.get("arrival_rate", 30.0)))
+        lambda_arrival_rate = float(data.get("lambda_arrival_rate", 30.0))
         
-        # 2. LAMBDA: Tiempo promedio de atención (minutos)
-        lambda_service_time = float(data.get("lambda_service_time", data.get("service_mean_minutes", 7.0)))
+        # μ in the UI is the mean service time in minutes, not the M/M/s service rate.
+        mu_service_time = float(data.get("mu_service_time", 7.0))
         
         # 3. S: Ventanillas de recepción
         num_servers = int(data.get("num_servers", 3))
         
         # 4. K: Tickets / fichos base
         base_tokens = int(data.get("base_tokens", 30))
-        
-        # Total de llegadas
-        total_arrivals = int(data.get("total_arrivals", base_tokens + 15))
         
         # Distribución de prioridades (Automático vs Manual)
         custom_priority_enabled = bool(data.get("custom_priority_enabled", False))
@@ -70,19 +66,17 @@ def run_simulation_api():
         random_seed = int(seed_val) if (seed_val is not None and str(seed_val).strip() != "") else None
         
         # Validaciones de seguridad
-        mu_arrival_rate = max(1.0, min(mu_arrival_rate, 120.0))
-        lambda_service_time = max(1.0, min(lambda_service_time, 30.0))
+        lambda_arrival_rate = max(1.0, min(lambda_arrival_rate, 120.0))
+        mu_service_time = max(1.0, min(mu_service_time, 30.0))
         num_servers = max(1, min(num_servers, 12))
         base_tokens = max(5, min(base_tokens, 100))
-        total_arrivals = max(base_tokens, min(total_arrivals, 250))
         
         # Instanciar y ejecutar el motor SimPy
         sim = IPSSimulation(
-            mu_arrival_rate=mu_arrival_rate,
-            lambda_service_time=lambda_service_time,
+            lambda_arrival_rate=lambda_arrival_rate,
+            mu_service_time=mu_service_time,
             num_servers=num_servers,
             base_tokens=base_tokens,
-            total_arrivals=total_arrivals,
             custom_distribution=custom_distribution,
             random_seed=random_seed
         )
@@ -136,9 +130,9 @@ def export_csv():
     writer.writerow([
         "ID Paciente", "Nombre", "Categoría", "Es Prioritario",
         "Llegada Puerta (Minutos)", "Ficho Asignado", "Es Ficho Extra", "Rechazado Sin Ficho",
-        "Espera Ficho (Min)", "Ingreso Sala (Min)", "Inicio Atención (Min)",
+        "Espera Ficho (Min)", "Espera Apertura 08:00 (Min)", "Ingreso Sala (Min)", "Inicio Atención (Min)",
         "Fin Atención (Min)", "Ventanilla", "Duración Servicio (Min)",
-        "Espera Recepción (Min)", "Tiempo Total IPS (Min)"
+        "Espera Turno tras Apertura (Min)", "Tiempo Total IPS (Min)"
     ])
     
     for p in patients:
@@ -152,6 +146,7 @@ def export_csv():
             "SÍ" if p.get("is_extra_token") else "NO",
             "SÍ" if p.get("token_rejected") else "NO",
             p.get("wait_time_token"),
+            p.get("wait_time_opening"),
             p.get("reception_arrival_time") or "N/A",
             p.get("service_start_time") or "N/A",
             p.get("service_end_time") or "N/A",
