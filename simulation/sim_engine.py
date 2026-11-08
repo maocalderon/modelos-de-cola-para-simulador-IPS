@@ -12,6 +12,7 @@ internamente por SimPy en el backend.
 
 import math
 import random
+import statistics
 from typing import List, Dict, Any, Optional
 import simpy
 
@@ -77,8 +78,8 @@ class IPSSimulation:
             self.total_arrivals = self.base_tokens + 15
             
         self.custom_distribution = custom_distribution
-        self.random_seed = random_seed
-        self.rng = random.Random(random_seed) if random_seed is not None else random.Random()
+        self.random_seed = random_seed if random_seed is not None else random.SystemRandom().randrange(1, 2**32)
+        self.rng = random.Random(self.random_seed)
         
         # SimPy Environment
         self.env = simpy.Environment()
@@ -384,6 +385,41 @@ class IPSSimulation:
         avg_wait_reception_reg = sum(p.wait_time_reception for p in regular_attended) / len(regular_attended) if regular_attended else 0.0
         avg_service_time = sum(p.service_duration for p in attended_patients) / len(attended_patients) if attended_patients else 0.0
         avg_total_system_time = sum(p.total_time_in_system for p in attended_patients) / len(attended_patients) if attended_patients else 0.0
+
+        waits = [p.wait_time_reception for p in attended_patients]
+        sorted_waits = sorted(waits)
+
+        def percentile(values, fraction):
+            if not values:
+                return 0.0
+            position = (len(values) - 1) * fraction
+            lower = math.floor(position)
+            upper = math.ceil(position)
+            if lower == upper:
+                return values[lower]
+            return values[lower] + (values[upper] - values[lower]) * (position - lower)
+
+        observed_minutes = max(
+            (p.service_end_time for p in attended_patients if p.service_end_time is not None),
+            default=180.0
+        ) - 180.0
+        total_service_minutes = sum(p.service_duration for p in attended_patients)
+        utilization = total_service_minutes / (observed_minutes * self.num_servers) if observed_minutes > 0 else 0.0
+        arrival_count = len(self.patients)
+        rejection_rate = len(rejected_patients) / arrival_count if arrival_count else 0.0
+        wait_stddev = statistics.pstdev(waits) if len(waits) > 1 else 0.0
+
+        recommendations = []
+        if utilization >= 0.85:
+            recommendations.append("La utilización observada es alta. Evalúe abrir más ventanillas o reducir el tiempo promedio de atención y vuelva a comparar con la misma semilla.")
+        if percentile(sorted_waits, 0.9) >= 60:
+            recommendations.append("El 10% de pacientes con mayor espera supera una hora. Revise la capacidad de atención y los horarios de llegada; pruebe aumentar S y compare el percentil 90.")
+        if rejection_rate >= 0.10:
+            recommendations.append("La proporción de rechazos es relevante. Revise K y la oferta de cupos; los tickets extra prioritarios se contabilizan aparte.")
+        if len(waits) >= 5 and wait_stddev > max(15.0, avg_wait_reception_all):
+            recommendations.append("Las esperas presentan alta dispersión. Inspeccione las llegadas tardías, la prioridad y los tiempos individuales para identificar casos extremos.")
+        if not recommendations:
+            recommendations.append("No aparecen alertas fuertes con estos umbrales en esta corrida. Compare varias semillas antes de tomar decisiones operativas.")
         
         # Teoría M/M/s:
         # Tasa de servicio mu_theory (atenciones por hora por servidor) = 60 / lambda_service_time
@@ -393,7 +429,7 @@ class IPSSimulation:
         priority_fraction = len(priority_attended) / len(attended_patients) if attended_patients else 0.25
         
         # Tasa de llegada efectiva
-        arrival_rate_theory = min(self.mu_arrival_rate, self.num_servers * mu_service_rate_per_hour * 0.88)
+        arrival_rate_theory = self.mu_arrival_rate
         
         theory_metrics = calculate_mms_theory(
             arrival_rate=arrival_rate_theory,
@@ -439,6 +475,19 @@ class IPSSimulation:
                 "priority_benefit_percent": round(
                     ((avg_wait_reception_reg - avg_wait_reception_prio) / avg_wait_reception_reg) * 100, 1
                 ) if avg_wait_reception_reg > 0 else 0.0,
+                "wait_reception_p50": round(percentile(sorted_waits, 0.5), 2),
+                "wait_reception_p90": round(percentile(sorted_waits, 0.9), 2),
+                "wait_reception_p95": round(percentile(sorted_waits, 0.95), 2),
+                "wait_reception_max": round(max(waits), 2) if waits else 0.0,
+                "wait_reception_stddev": round(wait_stddev, 2),
+                "observed_utilization_percent": round(utilization * 100, 2),
+                "rejection_rate_percent": round(rejection_rate * 100, 2),
+                "throughput_per_hour": round(len(attended_patients) * 60 / observed_minutes, 2) if observed_minutes > 0 else 0.0,
+            },
+            "analysis": {
+                "model": "Simulación de eventos discretos con llegadas y servicios exponenciales, prioridad no apropiativa y admisión limitada por tickets K con excepción prioritaria.",
+                "interpretation": recommendations,
+                "theory_comparison_note": "Erlang-C M/M/s supone régimen estacionario y cola ilimitada; es una referencia aproximada, no una predicción equivalente a esta simulación finita con prioridad y tickets.",
             },
             "theory_mms": theory_metrics,
             "events_count": len(self.events),

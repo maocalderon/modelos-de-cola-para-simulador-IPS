@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Simulador 3D IPS - Modelo de Colas M/M/s con Prioridades y Fichos</title>
+  <title>Simulador 3D IPS - Simulación de capacidad finita con prioridades</title>
   
   <!-- Estilos -->
   <link rel="stylesheet" href="/static/css/style.css">
@@ -35,7 +35,7 @@
       <div>
         <div class="brand-title">
           IPS VIVA SALUD INTEGRAL
-          <span class="brand-badge">MODELO M/M/s</span>
+          <span class="brand-badge">SIMULACIÓN FINITA CON PRIORIDADES</span>
         </div>
         <div class="brand-subtitle">Simulador de Recepción con Prioridades Humanitarias y Fichos</div>
       </div>
@@ -152,7 +152,7 @@
           <input type="number" id="param_s" class="form-input-number" min="1" max="12" value="3" step="1">
           <button type="button" class="btn-step-num" onclick="adjustNumberInput('param_s', 1)">+</button>
         </div>
-        <small class="field-hint">Servidores en paralelo para el modelo M/M/s con cola de prioridad en SimPy</small>
+        <small class="field-hint">Ventanillas paralelas de atención gestionadas por SimPy</small>
       </div>
 
       <!-- 4. K: Tickets / fichos base -->
@@ -324,7 +324,10 @@
   <!-- Dock Inferior: Acceso a Análisis, Tablas, Justificación y Descargas -->
   <nav class="bottom-dock">
     <button class="dock-btn" data-tab="charts">
-      <span>📊</span> Gráficas M/M/s
+      <span>📊</span> Gráficas
+    </button>
+    <button class="dock-btn" data-tab="analysis">
+      <span>🧭</span> Análisis e informe
     </button>
     <button class="dock-btn" data-tab="theory">
       <span>📐</span> Fórmulas Teóricas
@@ -349,7 +352,8 @@
       <div class="modal-header">
         <div class="modal-tabs">
           <button class="tab-btn active" data-tab="charts">📊 Gráficas Comparativas</button>
-          <button class="tab-btn" data-tab="theory">📐 Teoría de Colas (Erlang-C)</button>
+          <button class="tab-btn" data-tab="analysis">🧭 Análisis del sistema</button>
+          <button class="tab-btn" data-tab="theory">📐 Referencia Erlang-C</button>
           <button class="tab-btn" data-tab="justification">📋 Origen de Datos & Justificación</button>
           <button class="tab-btn" data-tab="patients">👥 Pacientes y Tiempos</button>
         </div>
@@ -371,15 +375,24 @@
           </div>
         </div>
 
+        <div id="tab-analysis" class="tab-content">
+          <div id="simulation-analysis-content"><p>Ejecuta una simulación para ver el análisis.</p></div>
+          <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;">
+            <button id="btn-download-report" class="btn-ctrl btn-primary-action">Descargar informe HTML</button>
+            <button id="btn-print-report" class="btn-ctrl">Imprimir / Guardar como PDF</button>
+          </div>
+        </div>
+
         <!-- Pestaña 2: Fórmulas de Teoría de Colas -->
         <div id="tab-theory" class="tab-content">
           <div id="theory-metrics-content">Cargando cálculos analíticos...</div>
           
           <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 16px; margin-top: 14px; font-size: 12px; line-height: 1.6; color: #cbd5e1;">
-            <h4 style="color: #38bdf8; margin-bottom: 8px;">Fundamento Matemático del Modelo M/M/s con Servidores Múltiples</h4>
+            <h4 style="color: #38bdf8; margin-bottom: 8px;">Referencia estacionaria M/M/s y sus límites</h4>
             <p>
-              El modelo <strong>M/M/s</strong> asume llegadas según un proceso de Poisson con tasa <strong>λ</strong>, tiempos de servicio exponenciales con tasa <strong>μ</strong> en cada una de las <strong>s</strong> ventanillas paralelas.
+              Erlang-C modela llegadas Poisson, servicio exponencial y una cola ilimitada en régimen estacionario. Este simulador representa una jornada finita con tickets K, prioridades y excepciones; por eso estas fórmulas son solo una referencia y no una predicción directa.
             </p>
+            <p style="margin-top:8px"><strong>Nota de notación:</strong> en el panel, MU representa la tasa de llegada y lambda el tiempo promedio de servicio. Es una notación propia de esta interfaz; la convención teórica habitual usa lambda para tasa de llegada y mu para tasa de servicio.</p>
             <ul style="margin-left: 20px; margin-top: 8px;">
               <li><strong>Intensidad de tráfico:</strong> ρ = λ / (s · μ). Para estabilidad se requiere ρ &lt; 1.</li>
               <li><strong>Probabilidad de cola (Erlang-C):</strong> P(Espera &gt; 0) = C(s, λ/μ) = [ (λ/μ)^s / (s!(1-ρ)) ] · P₀</li>
@@ -398,7 +411,7 @@
             </p>
           </div>
 
-          <h4 style="color: #f8fafc; font-size: 14px; margin-bottom: 10px;">Justificación de los Parámetros del Modelo Matemático M/M/s:</h4>
+          <h4 style="color: #f8fafc; font-size: 14px; margin-bottom: 10px;">Parámetros de la simulación de capacidad finita:</h4>
           
           <table class="data-table" style="margin-bottom: 20px;">
             <thead>
@@ -481,6 +494,6 @@
 
   <!-- Controlador de la Aplicación -->
   <script src="/static/js/ips_scene.js?v=20261107-3"></script>
-  <script src="/static/js/app.js?v=20261107-4"></script>
+  <script src="/static/js/app.js?v=20261107-5"></script>
 </body>
 </html>

@@ -291,6 +291,9 @@ class IPSSimulatorApp {
       searchInput.addEventListener("input", (e) => this.filterPatientsTable(e.target.value));
     }
 
+    document.getElementById("btn-download-report").addEventListener("click", () => this.exportSimulationReport(false));
+    document.getElementById("btn-print-report").addEventListener("click", () => this.exportSimulationReport(true));
+
     // Inicializar badge
     this._updatePrioBadge();
   }
@@ -379,6 +382,7 @@ class IPSSimulatorApp {
         this.updateKPIs(this.simData);
         this.renderCharts(this.simData);
         this.renderTheoryTab(this.simData.theory_mms);
+        this.renderAnalysis(this.simData);
         this.renderPatientsTable(this.simData.patients);
 
         // Actualizar HUD dinámico de fichos según K
@@ -876,6 +880,78 @@ class IPSSimulatorApp {
         </div>
       </div>
     `;
+  }
+
+  renderAnalysis(data) {
+    const container = document.getElementById("simulation-analysis-content");
+    if (!container) return;
+    const k = data.kpi_simulated;
+    const summary = data.summary;
+    const analysis = data.analysis;
+    const escape = value => String(value).replace(/[&<>"']/g, char => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[char]);
+    container.innerHTML = `
+      <h3>Lectura de resultados</h3>
+      <p>${escape(analysis.model)}</p>
+      <div class="kpi-grid" style="margin:14px 0;">
+        <div class="kpi-card"><span class="kpi-label">Utilización observada</span><span class="kpi-val">${k.observed_utilization_percent}%</span></div>
+        <div class="kpi-card"><span class="kpi-label">Espera mediana (P50)</span><span class="kpi-val">${k.wait_reception_p50} min</span></div>
+        <div class="kpi-card"><span class="kpi-label">Espera P90 / P95</span><span class="kpi-val">${k.wait_reception_p90} / ${k.wait_reception_p95} min</span></div>
+        <div class="kpi-card"><span class="kpi-label">Espera máxima</span><span class="kpi-val">${k.wait_reception_max} min</span></div>
+        <div class="kpi-card"><span class="kpi-label">Dispersión de espera</span><span class="kpi-val">${k.wait_reception_stddev} min</span></div>
+        <div class="kpi-card"><span class="kpi-label">Rechazo / productividad</span><span class="kpi-val">${k.rejection_rate_percent}% / ${k.throughput_per_hour} pac/h</span></div>
+      </div>
+      <h4>Interpretación y acciones sugeridas</h4>
+      <ul>${analysis.interpretation.map(item => `<li>${escape(item)}</li>`).join("")}</ul>
+      <p style="margin-top:14px;color:#94a3b8">${escape(analysis.theory_comparison_note)}</p>
+      <p>Atendidos: ${summary.total_attended}; rechazados: ${summary.total_rejected}; tickets base: ${summary.tokens_base_distributed}; extras prioritarios: ${summary.tokens_extra_distributed}.</p>`;
+  }
+
+  exportSimulationReport(printReport) {
+    if (!this.simData) return;
+    const data = this.simData;
+    const k = data.kpi_simulated;
+    const rows = [
+      ["Semilla", data.config.random_seed],
+      ["MU - tasa llegada (pacientes/h)", data.config.mu_arrival_rate],
+      ["Lambda - atención media (min)", data.config.lambda_service_time],
+      ["S - ventanillas", data.config.num_servers],
+      ["K - tickets base", data.config.base_tokens],
+      ["Llegadas generadas", data.summary.total_patients_arrived],
+      ["Atendidos", data.summary.total_attended],
+      ["Rechazados", data.summary.total_rejected],
+      ["Espera promedio recepción (min)", k.avg_wait_reception_all],
+      ["Espera P50 / P90 / P95 (min)", `${k.wait_reception_p50} / ${k.wait_reception_p90} / ${k.wait_reception_p95}`],
+      ["Espera máxima (min)", k.wait_reception_max],
+      ["Desviación estándar espera (min)", k.wait_reception_stddev],
+      ["Utilización observada (%)", k.observed_utilization_percent],
+      ["Tasa de rechazo (%)", k.rejection_rate_percent],
+      ["Productividad (pacientes/h)", k.throughput_per_hour]
+    ];
+    const escape = value => String(value ?? "-").replace(/[&<>"']/g, char => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[char]);
+    const report = `<!doctype html><html lang="es"><meta charset="utf-8"><title>Informe de simulación IPS</title>
+      <style>body{font:15px Arial,sans-serif;max-width:900px;margin:40px auto;color:#17212b}h1,h2{color:#087f8c}table{border-collapse:collapse;width:100%;margin:20px 0}td,th{border:1px solid #cbd5d1;padding:9px;text-align:left}th{background:#e8f2ef}li{margin:8px 0}.note{color:#52616b}@media print{button{display:none}}</style>
+      <h1>Informe de simulación de IPS</h1><p>${escape(data.analysis.model)}</p><h2>Configuración y medidas</h2>
+      <table><tbody>${rows.map(([label, value]) => `<tr><th>${escape(label)}</th><td>${escape(value)}</td></tr>`).join("")}</tbody></table>
+      <h2>Interpretación y recomendaciones</h2><ul>${data.analysis.interpretation.map(item => `<li>${escape(item)}</li>`).join("")}</ul>
+      <p class="note">${escape(data.analysis.theory_comparison_note)}</p><p class="note">La semilla y los parámetros permiten reproducir la corrida con la misma versión del simulador.</p></html>`;
+    if (printReport) {
+      const reportWindow = window.open("", "_blank");
+      if (!reportWindow) return;
+      reportWindow.document.write(report);
+      reportWindow.document.close();
+      reportWindow.addEventListener("load", () => reportWindow.print());
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([report], { type: "text/html;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `informe_ips_semilla_${data.config.random_seed}.html`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   renderPatientsTable(patients) {

@@ -1,7 +1,13 @@
-# 🏥 Simulador 3D para IPS - Modelo de Colas M/M/s con Prioridades y Fichos (SimPy)
+# Simulador 3D para IPS - Simulación de eventos discretos con prioridad y tickets
 ### IPS Viva Salud Integral
 
 Un simulador interactivo en 3D para la gestión de colas en una **Institución Prestadora de Salud (IPS)**, desarrollado con **Python**, el motor de eventos discretos **SimPy**, y una interfaz web 3D interactiva construida con **Three.js** y **Chart.js**.
+
+## Clasificación del modelo implementado
+
+El flujo de atención **no es un M/M/s/K clásico**. SimPy genera llegadas con intervalos exponenciales y duraciones de servicio exponenciales, con `s` ventanillas y prioridad no apropiativa. La admisión es finita por una cuota de `K` tickets base; después se rechazan los regulares y se permiten tickets extra para prioridades. Además, se simula una jornada finita y no un régimen estacionario. Por estas reglas, la clasificación más precisa es una simulación de eventos discretos con capacidad de admisión limitada, prioridades y excepciones.
+
+La interfaz denomina `MU` a la tasa de llegada y `lambda` al tiempo promedio de servicio. Esa notación difiere de la convención usual de colas, donde `lambda` es tasa de llegada y `mu` tasa de servicio. Erlang-C M/M/s se conserva solo como referencia estacionaria aproximada; no modela directamente K ni las excepciones prioritarias.
 
 ---
 
