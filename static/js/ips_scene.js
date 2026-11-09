@@ -523,6 +523,44 @@ class IPSScene {
       this.scene.add(planter);
     });
 
+    // Planta ornamental en el jardín exterior, junto al acceso peatonal.
+    const exteriorPlant = new THREE.Group();
+    const terracottaMat = new THREE.MeshStandardMaterial({ color: 0xc47752, roughness: 0.88 });
+    const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.46, 0.72, 16), terracottaMat);
+    pot.position.y = 0.36;
+    pot.castShadow = true;
+    exteriorPlant.add(pot);
+
+    const soil = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.53, 0.53, 0.06, 16),
+      new THREE.MeshStandardMaterial({ color: 0x493526, roughness: 1 })
+    );
+    soil.position.y = 0.72;
+    exteriorPlant.add(soil);
+
+    const leafMats = [
+      new THREE.MeshStandardMaterial({ color: 0x27764c, roughness: 0.82, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ color: 0x4f9b58, roughness: 0.82, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ color: 0x71ad5c, roughness: 0.82, side: THREE.DoubleSide })
+    ];
+    const stemMat = new THREE.MeshStandardMaterial({ color: 0x3b7546, roughness: 0.9 });
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.05, 8), stemMat);
+    stem.position.y = 1.22;
+    exteriorPlant.add(stem);
+
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8), leafMats[i % leafMats.length]);
+      leaf.scale.set(0.42, 1.35, 0.12);
+      leaf.position.set(Math.cos(angle) * 0.48, 1.55 + (i % 2) * 0.08, Math.sin(angle) * 0.48);
+      leaf.rotation.z = Math.cos(angle) * 0.72;
+      leaf.rotation.x = Math.sin(angle) * 0.72;
+      leaf.castShadow = true;
+      exteriorPlant.add(leaf);
+    }
+    exteriorPlant.position.set(-18, 0, 15.5);
+    this.scene.add(exteriorPlant);
+
     this.buildAmbulance(17, 9.5);
     this.buildAmbulance(17, 19.2);
   }
@@ -897,7 +935,7 @@ class IPSScene {
     crossVertical.position.set(-3.7, 0.35, 0.19);
     crossHorizontal.position.set(-3.7, 0.35, 0.19);
     sign.add(crossVertical, crossHorizontal);
-    const name = this.createTextSprite("IPS VIVA SALUD INTEGRAL", "#ffffff", "#087f8c", null, 27);
+    const name = this.createTextSprite("IPS Viva Salud Integral", "#ffffff", "#087f8c", null, 27);
     name.position.set(0.65, 0.35, 0.2);
     sign.add(name);
     sign.position.set(0, 6.8, 4);
